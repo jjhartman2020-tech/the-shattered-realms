@@ -1,0 +1,188 @@
+# Settlements
+
+## Table of Contents
+
+1. Purpose
+2. Settlement Principles
+3. Settlement Types
+4. Infrastructure
+5. Services
+6. Summary
+
+---
+
+# Purpose
+
+The Settlements framework defines how communities are organized throughout the world.
+
+Settlements provide locations where people live, work, trade, govern, and interact.
+
+While every settlement is unique, this framework establishes the common principles that allow villages, towns, cities, capitals, and other communities to function consistently.
+
+---
+
+# Settlement Principles
+
+Every settlement should develop according to its location, history, available resources, and relationship with the surrounding world.
+
+Settlements should be:
+
+- Believable
+- Functional
+- Distinct
+- Scalable
+- Connected to the World
+
+Each settlement should feel like a natural consequence of its environment rather than an isolated point on a map.
+
+---
+
+# Settlement Types
+
+Settlements may exist in many forms depending on their size and purpose.
+
+Examples include:
+
+- Hamlets
+- Villages
+- Towns
+- Cities
+- Capitals
+- Fortified Settlements
+- Trade Posts
+- Mining Camps
+- Religious Communities
+- Frontier Outposts
+- Custom Settlements
+
+Different settlement types should naturally provide different opportunities, challenges, and services.
+
+---
+
+## Infrastructure
+
+A settlement's infrastructure reflects its size, wealth, and development.
+
+Infrastructure may include:
+
+- Roads
+- Housing
+- Defensive Walls
+- Markets
+- Wells
+- Farms
+- Bridges
+- Docks
+- Public Buildings
+- Workshops
+
+Infrastructure should influence how the settlement functions without requiring every feature to exist in every community.
+
+---
+
+## Services
+
+Settlements may provide services appropriate to their size and importance.
+
+Examples include:
+
+- Inns
+- Taverns
+- General Stores
+- Blacksmiths
+- Healers
+- Stables
+- Banks
+- Libraries
+- Temples
+- Guild Halls
+- Crafting Facilities
+
+The availability and quality of services should reflect the settlement's development, population, and regional importance.
+
+Small settlements should provide essential services, while larger settlements may offer greater variety and specialization.
+
+---
+
+# Settlement Development
+
+Settlements are not static locations.
+
+As the campaign progresses, settlements may develop in response to world events, economic conditions, political changes, environmental factors, and player actions.
+
+Examples include:
+
+- Population growth or decline.
+- New construction projects.
+- Economic prosperity or hardship.
+- Damage from war or natural disasters.
+- Expansion beyond existing borders.
+- Changes in local leadership.
+
+Settlement development should emerge naturally through the World Simulation framework.
+
+---
+
+## Local Identity
+
+Every settlement should possess characteristics that distinguish it from others.
+
+Identity may be influenced by:
+
+- Geography
+- Local Resources
+- Dominant Industries
+- Architecture
+- Traditions
+- History
+- Religion
+- Regional Culture
+
+These characteristics should make each settlement recognizable without requiring every location to be extensively detailed.
+
+---
+
+## Connections
+
+Settlements rarely exist in isolation.
+
+They should maintain logical connections with the surrounding world through:
+
+- Roads
+- Rivers
+- Trade Routes
+- Ports
+- Neighboring Settlements
+- Political Borders
+
+These connections influence travel, commerce, communication, and regional development.
+
+The importance of a settlement often depends upon its relationships with nearby locations as much as its own size or wealth.
+
+---
+
+## Interaction With Other Systems
+
+The Settlements framework defines communities while relying on other systems to govern their specific functions.
+
+Examples include:
+
+- **Kingdoms** define the political entity that governs the settlement.
+- **NPCs** define the individuals who live and work there.
+- **Factions** define organizations that may operate within the settlement.
+- **Economy** governs trade, prices, and commerce.
+- **Crime** governs unlawful activity and legal consequences.
+- **Exploration** governs discovering and navigating settlements.
+- **World Events** may change settlements over time.
+
+This framework establishes what a settlement is without redefining the responsibilities of other systems.
+
+---
+
+# Summary
+
+The Settlements framework defines how communities function within the world by providing structure, services, infrastructure, and local identity.
+
+Rather than treating settlements as simple map markers, the framework encourages each community to develop naturally according to its environment, history, and relationship with the surrounding world.
+
+By remaining connected to other documented systems, settlements become living places that evolve alongside the campaign while maintaining consistency with the broader world.
