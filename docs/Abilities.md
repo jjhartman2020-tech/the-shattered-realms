@@ -21,8 +21,15 @@ Status: In Development
 12. AI Generated Abilities
 13. Balance Philosophy
 14. Future Systems
-
----
+15. scallings 
+16.cooldowns 
+17. targeting rules 
+18. abbility inteactoins 
+19. templates 
+20.general information 
+21.reqiurments 
+22.ussage 
+23. effects 
 
 # 1. Ability Philosophy
 
@@ -273,3 +280,153 @@ Possible additions:
 - Seasonal Abilities
 - Event Exclusive Abilities
 - Cosmetic Ability Effects
+
+---
+
+# Ability Scaling
+
+Abilities should remain useful throughout an entire campaign without requiring players to repeatedly replace their favorite abilities.
+
+Abilities do **not** gain levels independently.
+
+Instead, an ability's effectiveness may scale automatically based on the character using it.
+
+Possible scaling factors include:
+
+- Character Level
+- Attributes
+- Equipment
+- Passive Abilities
+- Active Status Effects
+- Environmental Conditions
+
+Each ability determines which attributes contribute to its effectiveness.
+
+Example scaling statistics include:
+
+- Damage
+- Healing
+- Shield Strength
+- Duration
+- Range
+- Number of Targets
+- Area of Effect
+- Resource Cost (when appropriate)
+
+Scaling should preserve an ability's identity while ensuring it remains relevant throughout progression.
+
+---
+
+# Cooldowns
+
+Some abilities require time before they may be used again.
+
+Cooldowns exist independently from resource costs.
+
+Common cooldown types include:
+
+- No Cooldown
+- 1 Turn
+- Multiple Turns
+- Once Per Encounter
+- Once Per Rest
+- Once Per Day
+- Limited Charges
+
+Cooldowns should be used primarily to balance powerful or game-changing abilities rather than ordinary attacks.
+
+---
+
+# Targeting Rules
+
+Every ability defines how it selects valid targets.
+
+Common targeting methods include:
+
+- Self
+- Ally
+- Enemy
+- Object
+- Ground Location
+- Single Target
+- Multiple Targets
+- Radius
+- Cone
+- Line
+- Chain
+- Random Target
+- Nearest Target
+- Lowest Health Target
+
+Each ability should clearly define:
+
+- Valid Targets
+- Maximum Range
+- Area of Effect
+- Target Limit
+
+Targeting should remain consistent so both players and the AI Game Master can reliably understand how every ability functions.
+
+---
+
+# Ability Interactions
+
+Abilities may interact with other abilities, status effects, environmental hazards, equipment, or world objects.
+
+Examples include:
+
+- Fire igniting Oil
+- Ice freezing Water
+- Lightning spreading through Wet targets
+- Wind increasing Fire spread
+- Earth creating defensive barriers
+
+Interactions should reward creative thinking without requiring players to memorize overly complex combinations.
+
+The AI Game Master may create additional logical interactions provided they remain consistent with established world rules.
+
+---
+
+# Ability Templates
+
+Every ability should follow a standardized structure.
+
+## General Information
+
+- Name
+- Description
+- Category
+- Type
+
+---
+
+## Requirements
+
+- Ability Point Cost
+- Attribute Requirements
+- Class Restrictions (if any)
+- Origin Restrictions (if any)
+
+---
+
+## Usage
+
+- Resource Cost
+- Cooldown
+- Valid Targets
+- Range
+- Area of Effect
+
+---
+
+## Effects
+
+- Primary Effect
+- Secondary Effects
+- Status Effects Applied
+- Scaling Attributes
+- Special Interactions
+
+---
+
+Using a standardized template ensures consistency for both handcrafted and AI-generated abilities while making future balancing significantly easier.
