@@ -1,0 +1,161 @@
+# Time and Weather
+
+## Table of Contents
+
+1. Purpose
+2. Time
+3. Day and Night
+4. Seasons
+5. Weather
+6. Environmental Effects
+7. Forecasting and Predictability
+8. Interaction With Other Systems
+9. Summary
+
+---
+
+# Purpose
+
+The Time and Weather framework defines how the passage of time and changing environmental conditions influence the campaign world.
+
+Rather than serving as background detail, time and weather should meaningfully affect exploration, travel, settlements, combat, world simulation, and player decision-making.
+
+Both systems should evolve naturally according to the world's established logic.
+
+---
+
+# Time
+
+Time is one of the primary forces that drives the world forward.
+
+As time passes, the world should continue to develop through:
+
+- Character Progression
+- Quest Progression
+- World Events
+- Political Changes
+- Settlement Development
+- Seasonal Cycles
+- Economic Activity
+- Environmental Change
+
+Time should never feel frozen while players are inactive.
+
+The AI should advance time appropriately based on player actions, travel, rest, and significant events.
+
+---
+
+## Day and Night
+
+The time of day should meaningfully influence gameplay without unnecessarily restricting player freedom.
+
+Examples include:
+
+- Businesses opening and closing.
+- NPC daily routines.
+- Reduced visibility at night.
+- Different wildlife activity.
+- Increased criminal activity after dark.
+- Certain quests or encounters becoming available only at specific times.
+
+Day and night should encourage strategic planning while making the world feel alive.
+
+---
+
+# Seasons
+
+If the campaign setting includes seasonal changes, they should influence both the environment and the world's inhabitants.
+
+Seasonal effects may include:
+
+- Temperature changes.
+- Agricultural cycles.
+- Migration of wildlife.
+- Festivals and holidays.
+- Travel conditions.
+- Availability of resources.
+- Regional events.
+
+Seasonal changes should occur gradually and become part of the world's natural rhythm.
+
+---
+
+# Weather
+
+Weather should arise naturally from the surrounding environment and season.
+
+Examples include:
+
+- Clear Skies
+- Rain
+- Snow
+- Fog
+- Wind
+- Storms
+- Extreme Heat
+- Extreme Cold
+- Magical Weather
+
+Weather should enhance immersion while providing meaningful opportunities and challenges.
+
+It should never exist solely to inconvenience the players.
+
+---
+
+# Environmental Effects
+
+Environmental conditions may influence:
+
+- Visibility
+- Travel
+- Exploration
+- Combat
+- Resource Gathering
+- Wildlife Behavior
+- Settlement Activity
+
+The impact of environmental conditions should remain proportional to their severity and consistent with documented mechanics.
+
+---
+
+# Forecasting and Predictability
+
+Weather should not change arbitrarily.
+
+Whenever appropriate, players should be able to anticipate changing conditions through:
+
+- Natural observation.
+- Local knowledge.
+- Experienced guides.
+- Weather forecasts.
+- Magical methods.
+
+Preparing for expected conditions should reward planning without eliminating uncertainty.
+
+---
+
+# Interaction With Other Systems
+
+The Time and Weather framework influences many areas of the campaign while relying on other documented systems for their specific mechanics.
+
+Examples include:
+
+- **Travel** adapts to changing conditions.
+- **Exploration** reflects environmental visibility and hazards.
+- **World Simulation** advances as time passes.
+- **World Events** occur over time.
+- **Settlements** follow daily and seasonal routines.
+- **Combat** applies any mechanical effects defined elsewhere.
+- **Quests** may become available or expire as time progresses.
+
+This framework governs when and why environmental changes occur without redefining the mechanics that respond to them.
+
+---
+
+# Summary
+
+The Time and Weather framework ensures that the world changes naturally as time passes.
+
+By integrating daily cycles, seasons, and weather into the broader campaign, the AI creates a world that feels dynamic, believable, and responsive.
+
+Time should encourage meaningful decisions, while weather should enrich gameplay through logical opportunities and challenges rather than arbitrary obstacles.
