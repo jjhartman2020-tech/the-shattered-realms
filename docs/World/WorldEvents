@@ -1,0 +1,306 @@
+# World Events
+
+## Table of Contents
+
+1. Purpose
+2. World Event Principles
+3. Event Categories
+4. Event Lifecycle
+5. World Reactions
+6. Player Influence
+7. Interaction With Other Systems
+8. Summary
+
+---
+
+# Purpose
+
+The World Events framework defines how significant changes occur throughout the campaign world.
+
+World events represent meaningful developments that affect regions, organizations, settlements, characters, or the world as a whole.
+
+These events create the feeling that the world continues to evolve independently while still allowing players to influence its future.
+
+---
+
+# World Event Principles
+
+Every world event should strive to be:
+
+- Logical
+- Dynamic
+- Consequential
+- Context-Aware
+- Persistent
+
+Events should emerge naturally from the current state of the world rather than appearing solely because enough time has passed.
+
+Whenever possible, events should have understandable causes, visible progression, and lasting consequences.
+
+---
+
+# Event Categories
+
+World events may exist at many different scales.
+
+## Local Events
+
+Local events affect individual locations or nearby communities.
+
+Examples include:
+
+- Festivals
+- Criminal activity
+- Fires
+- Local elections
+- Trade disputes
+- Disease outbreaks
+- Monster sightings
+- Resource discoveries
+
+Local events typically influence a limited area but may grow into larger developments if left unresolved.
+
+---
+
+## Regional Events
+
+Regional events influence multiple settlements or an entire province.
+
+Examples include:
+
+- Military campaigns
+- Famine
+- Refugee movements
+- Political instability
+- Economic booms
+- Natural disasters
+- Religious movements
+
+Regional events often create new opportunities, dangers, and quests for nearby players.
+
+---
+
+## Global Events
+
+Global events affect much of the campaign world.
+
+Examples include:
+
+- Major wars
+- Pandemics
+- Magical catastrophes
+- Climatic shifts
+- Collapse of kingdoms
+- Formation of new nations
+- World-changing discoveries
+- Ancient threats awakening
+
+Global events should be uncommon and feel appropriately significant.
+
+Their consequences should extend across many existing systems.
+
+---
+
+# Event Lifecycle
+
+World events should progress through recognizable stages.
+
+A typical event may include:
+
+1. Cause
+2. Early Signs
+3. Escalation
+4. Peak
+5. Resolution
+6. Aftermath
+
+Not every event requires every stage, but events should rarely appear or disappear without explanation.
+
+Players should often have opportunities to recognize developing situations before they reach their conclusion.
+
+---
+
+## Event Visibility
+
+Not every event should be immediately known by every character.
+
+Information may spread through:
+
+- Travelers
+- Merchants
+- Rumors
+- Messengers
+- Newspapers
+- Scouts
+- Magical communication
+- Direct observation
+
+The availability and reliability of information should depend on the campaign setting and current circumstances.
+
+Uncertainty can create meaningful investigation and decision-making without relying on hidden information alone.
+
+---
+
+# World Reactions
+
+The world should actively respond to significant events.
+
+Possible reactions include:
+
+- Changing trade routes
+- Increased military presence
+- Population movement
+- Rising or falling prices
+- New laws
+- Shifting alliances
+- Altered travel conditions
+- Public celebrations or unrest
+
+Different regions and factions may respond differently to the same event depending on their interests, resources, and beliefs.
+
+These reactions should reinforce that every major event creates ripple effects beyond its original location.
+
+---
+
+# Player Influence
+
+Players should have the ability to influence world events through both direct and indirect actions.
+
+Examples include:
+
+- Supporting one faction over another.
+- Preventing or accelerating conflicts.
+- Completing or ignoring critical quests.
+- Eliminating influential individuals.
+- Discovering important information.
+- Introducing new technologies or magic.
+- Negotiating peace.
+- Triggering unintended consequences.
+
+Player decisions should shape the development of events without granting absolute control over the world's direction.
+
+The world should remain capable of adapting to player actions in believable ways.
+
+---
+
+# Event Persistence
+
+World events should leave lasting marks on the campaign.
+
+Completed events should continue to influence the world through their consequences.
+
+Examples include:
+
+- Rebuilt or abandoned settlements.
+- Changed political borders.
+- New rulers.
+- Memorials and monuments.
+- Economic recovery or decline.
+- Altered ecosystems.
+- Cultural traditions.
+- Lingering magical effects.
+
+Events should become part of the world's history rather than disappearing once completed.
+
+---
+
+# Concurrent Events
+
+Multiple world events may occur simultaneously.
+
+The AI should manage these events independently while considering how they influence one another.
+
+For example:
+
+- A famine may weaken a kingdom during an ongoing war.
+- A festival may continue despite nearby political unrest.
+- A severe winter may delay military campaigns.
+- Refugees from one conflict may create tensions elsewhere.
+
+The interaction of multiple events should create a world that feels interconnected rather than scripted.
+
+---
+
+# Event Resolution
+
+Not every world event requires player involvement.
+
+Events may conclude through:
+
+- Player intervention.
+- NPC actions.
+- Natural progression.
+- Political negotiation.
+- Military victory or defeat.
+- Environmental change.
+- Passage of time.
+
+The AI should determine outcomes based on established world conditions rather than predetermined narratives.
+
+Player involvement should increase the opportunity to influence outcomes, not guarantee success.
+
+---
+
+# Historical Record
+
+Major world events become part of the world's history.
+
+Historical events may continue to influence:
+
+- Politics.
+- Culture.
+- Religion.
+- Geography.
+- Architecture.
+- Relationships between factions.
+- Future quests.
+- NPC beliefs and dialogue.
+
+Characters should remember significant events according to their knowledge, experiences, and perspective.
+
+The world should develop a living history that grows throughout the campaign.
+
+---
+
+# AI Responsibilities
+
+When managing world events, the AI should:
+
+- Maintain logical cause-and-effect relationships.
+- Consider the current state of the world before introducing new events.
+- Balance player agency with independent world progression.
+- Ensure consequences remain consistent over time.
+- Avoid introducing major events solely for dramatic effect.
+- Allow both success and failure to meaningfully influence future developments.
+- Preserve continuity across the campaign.
+
+The AI should prioritize believable progression over constant escalation.
+
+---
+
+# Interaction With Other Systems
+
+The World Events framework coordinates large-scale changes across the campaign while relying on other systems to define their specific mechanics.
+
+Examples include:
+
+- **Kingdoms** define political entities affected by events.
+- **Settlements** reflect local consequences.
+- **Travel** adapts to changing conditions.
+- **Time and Weather** influence event progression.
+- **Quests** provide opportunities for player involvement.
+- **Reputation** changes how individuals and factions respond.
+- **Crime** may increase or decrease during periods of instability.
+- **World Simulation** governs ongoing changes between player actions.
+
+World Events connects these systems by describing how significant developments reshape the campaign without redefining their individual responsibilities.
+
+---
+
+# Summary
+
+The World Events framework ensures that the campaign world remains dynamic, interconnected, and responsive.
+
+By allowing events to emerge naturally, progress logically, interact with one another, and leave lasting consequences, the AI creates a world that feels alive regardless of whether the players are present.
+
+Players should influence history through meaningful decisions, but they should never be the sole force driving the world's evolution. The world should possess its own momentum, creating a believable setting where every action contributes to an ever-growing history.
