@@ -60,6 +60,18 @@ class GameMaster:
         for note in result.get("world_notes", []):
             self._store_memory(note, default_category="world")
 
+        # Never rely on the model to remember to save the turn. Every completed
+        # exchange gets a compact durable transcript automatically. This gives
+        # retrieval a fallback even if a model forgets to emit memories.
+        narration = str(result.get("narration", "")).strip()
+        if narration:
+            self.memory.remember(
+                f"Player action: {action}\nGame Master result: {narration}",
+                category="turn",
+                importance=1,
+                confirmed=True,
+            )
+
         result["state"] = self.state.snapshot()
         result["memory_count"] = len(self.memory.all())
         return result
