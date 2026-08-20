@@ -56,6 +56,7 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor.setdefault("attack_bonus", 0)
         actor.setdefault("damage", "1d4")
         actor.setdefault("movement", channels["movement"])
+        actor["movement_used"] = 0
         actor.setdefault("attack_range", 1)
         actor.setdefault("critical_chance_percent", channels["critical_chance_percent"])
         actor.setdefault("physical_resistance_percent", channels["physical_resistance_percent"])
@@ -108,8 +109,12 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
     origin = _normalize_position(actor.get("position"))
     distance = abs(origin["x"] - destination["x"]) + abs(origin["y"] - destination["y"])
     movement_limit = int(actor.get("movement", 0))
-    if distance > movement_limit:
-        raise ValueError(f"{actor_name} can move only {movement_limit} squares this turn")
+    movement_used = int(actor.get("movement_used", 0))
+    movement_remaining = max(0, movement_limit - movement_used)
+    if distance > movement_remaining:
+        raise ValueError(
+            f"{actor_name} has only {movement_remaining} movement squares remaining this turn"
+        )
 
     for other in combat.get("combatants", []):
         if other is actor or other.get("defeated"):
@@ -118,8 +123,16 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
             raise ValueError(f"Square ({destination['x']}, {destination['y']}) is occupied by {other.get('name')}")
 
     actor["position"] = destination
-    result = {"actor": actor_name, "from": origin, "to": destination,
-              "distance": distance, "movement_limit": movement_limit}
+    actor["movement_used"] = movement_used + distance
+    result = {
+        "actor": actor_name,
+        "from": origin,
+        "to": destination,
+        "distance": distance,
+        "movement_limit": movement_limit,
+        "movement_used": actor["movement_used"],
+        "movement_remaining": max(0, movement_limit - actor["movement_used"]),
+    }
     combat.setdefault("log", []).append({"type": "move", **result})
     return result
 
@@ -219,6 +232,7 @@ def end_turn(combat: Dict) -> Dict:
         actor = _find_actor(combat, order[index])
         if not actor.get("defeated"):
             combat["turn_index"] = index
+            actor["movement_used"] = 0
             break
         if index == starting_index:
             combat["active"] = False
