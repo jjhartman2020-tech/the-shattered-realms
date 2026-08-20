@@ -80,20 +80,6 @@ def _print_combat_results(results, combat=None) -> None:
         if event_type == "combat_start":
             print("\n⚔️ COMBAT BEGINS")
             print("Initiative:", " → ".join(event.get("order", [])))
-        elif event_type in {"player_move", "enemy_move"}:
-            actor = event.get("actor", "Combatant")
-            origin = event.get("from") or {}
-            destination = event.get("to") or {}
-            print(
-                f"\n🏃 {actor} moves "
-                f"({origin.get('x', 0)}, {origin.get('y', 0)}) → "
-                f"({destination.get('x', 0)}, {destination.get('y', 0)})"
-            )
-            print(
-                f"Movement: {event.get('movement_remaining', 0)}/"
-                f"{event.get('movement_limit', 0)} remaining "
-                f"({event.get('movement_used', 0)} used this turn)"
-            )
         elif event_type in {"player_attack", "enemy_attack"}:
             attacker = event.get("attacker", "Attacker")
             target = event.get("target", "Target")
