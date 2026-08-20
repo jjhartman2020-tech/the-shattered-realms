@@ -47,10 +47,10 @@ COMBAT RULES
 - Never invent or silently change those values.
 - Each combatant normally has one primary action per turn. Movement uses a separate movement budget and does not consume the primary action.
 - A basic attack consumes the primary action. Defend consumes the primary action. Movement may happen before or after the primary action if movement remains.
-- Defend grants +2 AC until the start of that combatant's next turn. Python resolves this; do not alter the bonus.
+- Defense is a 0-30 attribute. When a combatant takes the Defend action, every full 3 Defense grants +1 temporary AC until the start of that combatant's next turn. Python resolves the exact bonus; never replace it with a flat value.
 - To begin combat return combat_request.type=\"start\" with every newly-created enemy.
 - Enemy entries include name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, and role. Position and attack_range may be included when established.
-- Attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed.
+- Attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed, defense.
 - During active combat use attack, move, move_attack, defend, end_turn, or pass.
 - If the player says they defend, guard, brace, take a defensive stance, or focus on defense, return {\"type\":\"defend\"}.
 - If the player says they end their turn, wait, pass, hold position, or otherwise deliberately finish without another action, return {\"type\":\"end_turn\"}. Do NOT merely narrate that their turn ended.
