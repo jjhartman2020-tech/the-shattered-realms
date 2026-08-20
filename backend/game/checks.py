@@ -12,10 +12,10 @@ DIFFICULTY_DCS = {"trivial": 5, "easy": 8, "standard": 12, "hard": 16,
                   "very_hard": 20, "extreme": 25}
 
 
-def resolve_check(*, modifier: float = 0, dc: int | None = None,
+def resolve_check(*, modifier: int = 0, dc: int | None = None,
                   difficulty: str = "standard", expression: str = "1d20",
                   reason: str = "") -> Dict:
-    """Roll and resolve one mechanical check using deterministic modifiers."""
+    """Roll and resolve one mechanical check using whole-number modifiers."""
     if dc is None:
         key = difficulty.strip().lower().replace(" ", "_")
         if key not in DIFFICULTY_DCS:
@@ -25,8 +25,8 @@ def resolve_check(*, modifier: float = 0, dc: int | None = None,
         raise ValueError("DC must be between 1 and 100")
 
     base = roll(expression)
-    applied_modifier = float(modifier)
-    total = float(base["total"]) + applied_modifier
+    applied_modifier = int(modifier)
+    total = int(base["total"]) + applied_modifier
     natural_1 = bool(base.get("natural_1"))
     natural_20 = bool(base.get("natural_20"))
     if natural_1:
@@ -39,7 +39,7 @@ def resolve_check(*, modifier: float = 0, dc: int | None = None,
         outcome, success = "failure", False
 
     return {"reason": reason.strip(), "expression": base["expression"],
-            "rolls": base["rolls"], "base_total": base["total"],
+            "rolls": base["rolls"], "base_total": int(base["total"]),
             "modifier": applied_modifier, "total": total, "dc": int(dc),
             "difficulty": difficulty, "success": success, "outcome": outcome,
-            "margin": total - dc, "natural_1": natural_1, "natural_20": natural_20}
+            "margin": total - int(dc), "natural_1": natural_1, "natural_20": natural_20}
