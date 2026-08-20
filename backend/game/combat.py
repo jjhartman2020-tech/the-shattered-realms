@@ -50,10 +50,6 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor["attribute_channels"] = channels
         actor.setdefault("hp", channels["max_health_base"])
         actor.setdefault("max_hp", channels["max_health_base"])
-        # Encounter enemy HP supplied by the Game Master is the enemy's full
-        # encounter health, not an already-wounded value. Keep the denominator
-        # locked to that starting HP so 17 HP stays 17/17 instead of becoming
-        # 17/20 because of the generic attribute-derived health calculation.
         if actor.get("team") == "enemy" and "hp" in raw:
             actor["max_hp"] = int(actor["hp"])
         actor.setdefault("mana", channels["max_mana_base"])
@@ -63,6 +59,8 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor.setdefault("damage", "1d4")
         actor.setdefault("movement", channels["movement"])
         actor["movement_used"] = 0
+        actor["primary_action_used"] = False
+        actor["defending"] = False
         actor.setdefault("attack_range", 1)
         actor.setdefault("critical_chance_percent", channels["critical_chance_percent"])
         actor.setdefault("physical_resistance_percent", channels["physical_resistance_percent"])
@@ -101,15 +99,26 @@ def current_actor(combat: Dict) -> Dict | None:
     return _find_actor(combat, combat["order"][combat["turn_index"]])
 
 
+def _require_turn(combat: Dict, actor: Dict, actor_name: str) -> None:
+    active = current_actor(combat)
+    if not active or active.get("name") != actor_name:
+        raise ValueError(f"It is not {actor_name}'s turn")
+    if actor.get("defeated"):
+        raise ValueError(f"{actor_name} is defeated and cannot act")
+
+
+def _require_primary_action(actor: Dict, actor_name: str) -> None:
+    if actor.get("primary_action_used"):
+        raise ValueError(f"{actor_name} has already used the primary action this turn")
+
+
 def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
                enforce_turn: bool = False) -> Dict:
     actor = _find_actor(combat, actor_name)
     if actor.get("defeated"):
         raise ValueError(f"{actor_name} is defeated and cannot move")
     if enforce_turn:
-        active = current_actor(combat)
-        if not active or active.get("name") != actor_name:
-            raise ValueError(f"It is not {actor_name}'s turn")
+        _require_turn(combat, actor, actor_name)
 
     destination = {"x": int(x), "y": int(y)}
     origin = _normalize_position(actor.get("position"))
@@ -143,6 +152,24 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
     return result
 
 
+def defend_actor(combat: Dict, actor_name: str, *, enforce_turn: bool = False) -> Dict:
+    """Spend the primary action to gain +2 AC until this actor's next turn begins."""
+    actor = _find_actor(combat, actor_name)
+    if enforce_turn:
+        _require_turn(combat, actor, actor_name)
+    _require_primary_action(actor, actor_name)
+    actor["primary_action_used"] = True
+    actor["defending"] = True
+    result = {
+        "actor": actor_name,
+        "defending": True,
+        "defense_ac_bonus": 2,
+        "primary_action_used": True,
+    }
+    combat.setdefault("log", []).append({"type": "defend", **result})
+    return result
+
+
 def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
                    attack_bonus: int | None = None, damage_expression: str | None = None,
                    damage_bonus: int | None = None, attack_attribute: str = "strength",
@@ -153,9 +180,8 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     if target.get("defeated"):
         raise ValueError(f"{target_name} is already defeated")
     if enforce_turn:
-        active = current_actor(combat)
-        if not active or active.get("name") != attacker_name:
-            raise ValueError(f"It is not {attacker_name}'s turn")
+        _require_turn(combat, attacker, attacker_name)
+        _require_primary_action(attacker, attacker_name)
 
     distance = grid_distance(attacker, target)
     maximum_range = int(attacker.get("attack_range", 1) if attack_range is None else attack_range)
@@ -179,21 +205,17 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     attack = roll("1d20")
     natural = int(attack["rolls"][0])
     total = int(attack["total"]) + total_attack_bonus
-    armor_class = int(target.get("armor_class", 10))
+    base_armor_class = int(target.get("armor_class", 10))
+    defense_ac_bonus = 2 if target.get("defending") else 0
+    armor_class = base_armor_class + defense_ac_bonus
     automatic_miss = natural == 1
     automatic_hit = natural == 20
     hit = False if automatic_miss else (True if automatic_hit else total >= armor_class)
 
-    # Criticals have two routes by design: a natural 20 is always critical,
-    # while other successful hits can crit through the attacker's Dexterity-
-    # based critical chance.
     crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
     crit_roll = int(roll("1d100")["total"]) if hit and not automatic_hit else None
     critical = bool(automatic_hit or (hit and crit_roll is not None and crit_roll <= crit_chance))
 
-    # A hit that beats Armor Class by a wide margin lands more cleanly.
-    # Every complete 3 points above AC adds +1 flat damage. This bonus is
-    # applied once even on a critical hit.
     accuracy_margin = max(0, total - armor_class) if hit else 0
     accuracy_margin_damage_bonus = accuracy_margin // 3
 
@@ -213,11 +235,14 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
         target["hp"] = max(0, int(target.get("hp", 0)) - damage)
         target["defeated"] = target["hp"] <= 0
 
+    attacker["primary_action_used"] = True
     outcome = {"attacker": attacker_name, "target": target_name,
                "attack_attribute": attack_attribute, "distance": distance,
                "attack_range": maximum_range, "d20": natural,
                "stat_accuracy_bonus": stat_accuracy, "other_attack_bonus": other_bonus,
                "attack_bonus": total_attack_bonus, "attack_total": total,
+               "base_armor_class": base_armor_class,
+               "defense_ac_bonus": defense_ac_bonus,
                "armor_class": armor_class, "hit": hit, "critical": critical,
                "critical_roll": crit_roll, "critical_chance_percent": crit_chance,
                "accuracy_margin": accuracy_margin,
@@ -225,6 +250,7 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
                "damage_bonus": applied_damage_bonus, "raw_damage": raw_damage,
                "physical_resistance_percent": resistance_percent,
                "damage": damage, "damage_rolls": damage_rolls,
+               "primary_action_used": True,
                "target_hp": int(target.get("hp", 0)),
                "target_max_hp": int(target.get("max_hp", target.get("hp", 0))),
                "target_defeated": bool(target.get("defeated"))}
@@ -250,6 +276,8 @@ def end_turn(combat: Dict) -> Dict:
         if not actor.get("defeated"):
             combat["turn_index"] = index
             actor["movement_used"] = 0
+            actor["primary_action_used"] = False
+            actor["defending"] = False
             break
         if index == starting_index:
             combat["active"] = False
