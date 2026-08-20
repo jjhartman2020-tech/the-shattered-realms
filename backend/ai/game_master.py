@@ -9,7 +9,7 @@ from .provider import provider_from_environment
 from .rules import RuleLibrary
 from backend.game.attributes import SKILL_ATTRIBUTE, attribute_check_bonus, build_combatant, normalize_attributes
 from backend.game.checks import resolve_check
-from backend.game.combat import current_actor, end_turn, move_actor, resolve_attack, start_combat
+from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack, start_combat
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
 
@@ -95,7 +95,7 @@ class GameMaster:
                 combat_results.extend(self._run_enemy_turns(active_combat))
                 self._persist_combat(active_combat)
 
-            elif request_type in {"attack", "move", "move_attack", "end_turn", "pass"} and isinstance(active_combat, dict) and active_combat.get("active"):
+            elif request_type in {"attack", "move", "move_attack", "defend", "end_turn", "pass"} and isinstance(active_combat, dict) and active_combat.get("active"):
                 actor = current_actor(active_combat)
                 player_name = str(snapshot.get("player", {}).get("name") or "Traveler")
                 if not actor or actor.get("name") != player_name:
@@ -113,9 +113,9 @@ class GameMaster:
                                 attack_attribute = "strength"
                             attack_result = resolve_attack(active_combat, player_name, target, attack_attribute=attack_attribute, enforce_turn=True)
                             combat_results.append({"type": "player_attack", **attack_result})
-                            if active_combat.get("active"):
-                                end_turn(active_combat)
-                                combat_results.extend(self._run_enemy_turns(active_combat))
+                        elif request_type == "defend":
+                            defense = defend_actor(active_combat, player_name, enforce_turn=True)
+                            combat_results.append({"type": "player_defend", **defense})
                         elif request_type in {"end_turn", "pass"}:
                             combat_results.append({"type": "player_end_turn", "actor": player_name})
                             end_turn(active_combat)
@@ -131,8 +131,8 @@ class GameMaster:
             resolved_context["active_combat"] = active_combat
             resolved_context["combat_result"] = combat_results
             resolved_context["mechanical_instruction"] = (
-                "Python has resolved combat. Narrate movement, remaining movement, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
-                "Positions and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, or alter the results."
+                "Python has resolved combat. Narrate movement, remaining movement, primary-action use, defending, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
+                "Positions, action availability, defense state, and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, or alter the results."
             )
             narrated = self.provider.respond(resolved_context)
             narrated["combat_request"] = None
@@ -193,6 +193,8 @@ class GameMaster:
         actor["mana"] = max_mana
         actor["max_mana"] = max_mana
         actor["movement_used"] = 0
+        actor["primary_action_used"] = False
+        actor["defending"] = False
         actor["defeated"] = False
         return actor
 
@@ -239,6 +241,8 @@ class GameMaster:
             actor["hp"] = int(actor.get("max_hp", actor.get("hp", 0)))
             actor["mana"] = int(actor.get("max_mana", actor.get("mana", 0)))
             actor["movement_used"] = 0
+            actor["primary_action_used"] = False
+            actor["defending"] = False
             actor["defeated"] = False
         self.state.set_path("encounter_template", {"combatants": pristine.get("combatants", []), "grid": pristine.get("grid", {})}, save=False)
         self.state.set_path("encounter_reset_pending", False, save=False)
@@ -255,7 +259,7 @@ class GameMaster:
                 break
             snapshot = self.state.snapshot()
             player_name = str(snapshot.get("player", {}).get("name") or "Traveler")
-            enemy_context = self.context_builder.build(player_action=f"Enemy turn: {actor.get('name')}", game_state=snapshot, memories=self.memory.context_for(str(actor.get("name"))), rules=self.rules.retrieve("enemy combat tactics target selection positioning movement"))
+            enemy_context = self.context_builder.build(player_action=f"Enemy turn: {actor.get('name')}", game_state=snapshot, memories=self.memory.context_for(str(actor.get("name"))), rules=self.rules.retrieve("enemy combat tactics target selection positioning movement defend"))
             enemy_context["active_combat"] = combat
             enemy_context["enemy_turn"] = {"actor": actor, "instruction": "Choose a legal tactical action using only information this enemy could know."}
             decision = self.provider.respond(enemy_context)
@@ -273,6 +277,9 @@ class GameMaster:
                         attack_attribute = "strength"
                     attack = resolve_attack(combat, str(actor.get("name")), target, attack_attribute=attack_attribute, enforce_turn=True)
                     results.append({"type": "enemy_attack", **attack})
+                elif request_type == "defend":
+                    defense = defend_actor(combat, str(actor.get("name")), enforce_turn=True)
+                    results.append({"type": "enemy_defend", **defense})
                 elif request_type not in {"move"}:
                     results.append({"type": "enemy_pass", "actor": actor.get("name")})
             except (TypeError, ValueError) as exc:
