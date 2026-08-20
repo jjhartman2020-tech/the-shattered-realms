@@ -34,7 +34,43 @@ def _format_damage_breakdown(event) -> str:
     return " | ".join(parts)
 
 
-def _print_combat_results(results) -> None:
+def _print_movement_hud(combat) -> None:
+    """Show the player's current tactical movement state during combat."""
+    if not isinstance(combat, dict) or not combat.get("active"):
+        return
+
+    combatants = combat.get("combatants") or []
+    player = next(
+        (actor for actor in combatants if isinstance(actor, dict) and actor.get("team") == "player"),
+        None,
+    )
+    if not player:
+        return
+
+    movement_total = int(player.get("movement", 0) or 0)
+    movement_used = int(player.get("movement_used", 0) or 0)
+    movement_remaining = max(0, movement_total - movement_used)
+    position = player.get("position") or {"x": 0, "y": 0}
+    if isinstance(position, (list, tuple)) and len(position) >= 2:
+        x, y = int(position[0]), int(position[1])
+    else:
+        x = int(position.get("x", 0)) if isinstance(position, dict) else 0
+        y = int(position.get("y", 0)) if isinstance(position, dict) else 0
+
+    order = combat.get("order") or []
+    turn_index = int(combat.get("turn_index", 0) or 0)
+    current_turn = order[turn_index] if order and 0 <= turn_index < len(order) else "Unknown"
+    round_number = int(combat.get("round", 1) or 1)
+
+    print("\n🏃 MOVEMENT HUD")
+    print(
+        f"Round {round_number} | Position: ({x}, {y}) | "
+        f"Movement: {movement_remaining}/{movement_total} remaining "
+        f"({movement_used} used) | Turn: {current_turn}"
+    )
+
+
+def _print_combat_results(results, combat=None) -> None:
     if not isinstance(results, list):
         return
     for event in results:
@@ -44,6 +80,20 @@ def _print_combat_results(results) -> None:
         if event_type == "combat_start":
             print("\n⚔️ COMBAT BEGINS")
             print("Initiative:", " → ".join(event.get("order", [])))
+        elif event_type in {"player_move", "enemy_move"}:
+            actor = event.get("actor", "Combatant")
+            origin = event.get("from") or {}
+            destination = event.get("to") or {}
+            print(
+                f"\n🏃 {actor} moves "
+                f"({origin.get('x', 0)}, {origin.get('y', 0)}) → "
+                f"({destination.get('x', 0)}, {destination.get('y', 0)})"
+            )
+            print(
+                f"Movement: {event.get('movement_remaining', 0)}/"
+                f"{event.get('movement_limit', 0)} remaining "
+                f"({event.get('movement_used', 0)} used this turn)"
+            )
         elif event_type in {"player_attack", "enemy_attack"}:
             attacker = event.get("attacker", "Attacker")
             target = event.get("target", "Target")
@@ -64,10 +114,14 @@ def _print_combat_results(results) -> None:
                 )
                 if event.get("target_defeated"):
                     print(f"{target} is defeated.")
+        elif event_type == "player_end_turn":
+            print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
         elif event_type == "enemy_pass":
             print(f"\n⚔️ {event.get('actor', 'Enemy')} takes no attack action.")
         elif event_type == "invalid":
             print(f"\n⚠️ COMBAT ACTION INVALID: {event.get('reason', 'Unknown reason')}")
+
+    _print_movement_hud(combat)
 
 
 def main() -> None:
@@ -99,7 +153,7 @@ def main() -> None:
                 f"RESULT: {outcome}"
             )
 
-        _print_combat_results(result.get("combat_results"))
+        _print_combat_results(result.get("combat_results"), result.get("combat"))
         print("\n" + result.get("narration", "The world waits...") + "\n")
 
 
