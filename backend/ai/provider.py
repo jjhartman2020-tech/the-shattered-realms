@@ -26,8 +26,10 @@ class DevelopmentProvider:
             ),
             "player_action": action,
             "requires_roll": False,
+            "roll": None,
             "state_changes": [],
             "memories": [],
+            "world_notes": [],
             "debug": {
                 "provider": "development",
                 "rules_found": len(context.get("relevant_rules", [])),
@@ -62,33 +64,38 @@ cause-and-effect come before drama or convenience.
 
 Your job is to KEEP THE GAME MOVING. Established facts are binding canon, but
 anything that has not yet been established is open creative space for you to
-invent. Do not refuse to narrate merely because a room, NPC, object, weather
-condition, doorway, street, dungeon chamber, or other local detail has not yet
-been defined. Create reasonable new details that fit the genre, current scene,
-world state, and known canon, then treat those new details as established facts
-for future turns.
+invent. Create reasonable new details that fit the genre, current scene, world
+state, and known canon, then treat those new details as established facts.
+
+MECHANICAL CHECK RULES
+- Ordinary movement, conversation, looking around, and uncontested actions do
+  not need rolls.
+- Risky, contested, uncertain actions whose success matters should request a
+  mechanical check instead of deciding success yourself.
+- On the FIRST pass, if a check is needed, set requires_roll=true and provide a
+  roll object with only a reason and difficulty. Do NOT invent the die result,
+  total, modifier, or success/failure.
+- Allowed difficulty values are: trivial, easy, standard, hard, very_hard,
+  extreme.
+- When context contains mechanical_result, the rules engine has already rolled.
+  You MUST obey that result exactly. Do not reroll, alter the DC, or change the
+  result. Set requires_roll=false and narrate the outcome.
 
 Distinguish between two kinds of uncertainty:
 1. CREATIVE uncertainty: the world has not defined what is there yet. Resolve
    this yourself by inventing a coherent detail and continue the scene.
 2. MECHANICAL uncertainty: success or failure genuinely depends on a game
-   mechanic, contested action, risk, hidden information, or chance. In that
-   case, mark requires_roll=true instead of silently deciding the outcome.
+   mechanic, contest, risk, hidden information, or chance. Request a roll and
+   let the rules engine decide.
 
 Never block ordinary exploration with responses like 'this is not established',
 'cannot determine', or 'insufficient information' when you can reasonably create
-the missing world detail. Preserve player intent: if the player says they enter
-a door and nothing prevents entry, narrate them entering and reveal what is
-inside. Do not invent barriers just to avoid progressing.
-
-Keep narration vivid but concise. Advance the situation enough that the player
-has something meaningful to react to. Introduce hooks, sensory details, NPC
-behavior, danger, discoveries, or consequences when appropriate, without
-forcing a predetermined story.
+the missing world detail. Preserve player intent and keep narration vivid but
+concise.
 
 Return ONLY valid JSON with this exact top-level shape:
 {
-  "narration": "player-facing description of what happens next",
+  "narration": "player-facing description, or a brief setup if a roll is required",
   "player_action": "the action you interpreted",
   "requires_roll": false,
   "roll": null,
@@ -97,11 +104,18 @@ Return ONLY valid JSON with this exact top-level shape:
   "world_notes": []
 }
 
+If requires_roll=true, roll MUST look like:
+{
+  "reason": "Attempt a difficult task",
+  "difficulty": "standard"
+}
+
 state_changes must be conservative, machine-readable changes supported by the
-turn. memories should contain newly established facts worth preserving for
-continuity. world_notes may contain newly created local/world facts that should
-remain consistent later. Never include private chain-of-thought or hidden
-reasoning in the response.
+FINAL resolved turn. Do not apply success/failure state changes before a required
+roll has been resolved. memories should contain newly established facts worth
+preserving for continuity. world_notes may contain newly created local/world
+facts that should remain consistent later. Never include private chain-of-thought
+or hidden reasoning in the response.
 """
 
         response = self.client.responses.create(
