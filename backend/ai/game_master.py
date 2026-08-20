@@ -6,6 +6,7 @@ from .context import ContextBuilder
 from .memory import CampaignMemory
 from .provider import provider_from_environment
 from .rules import RuleLibrary
+from backend.game.checks import resolve_check
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
 
@@ -29,7 +30,7 @@ class GameMaster:
         self.ready = True
 
     def handle_action(self, player_action: str) -> Dict:
-        """Resolve one unrestricted player action through the AI core."""
+        """Resolve one unrestricted player action through AI + deterministic rules."""
         action = player_action.strip()
         if not action:
             return {
@@ -37,8 +38,6 @@ class GameMaster:
                 "state": self.state.snapshot(),
             }
 
-        # Give every turn both relevant memories and enough recent canon to keep
-        # the scene coherent even when the player's wording changes.
         relevant_memories = self.memory.context_for(action)
         relevant_rules = self.rules.retrieve(action)
         context = self.context_builder.build(
@@ -49,24 +48,60 @@ class GameMaster:
         )
 
         result = self.provider.respond(context)
+        mechanical_result = None
+
+        # The AI may REQUEST a check, but Python owns the actual random roll and
+        # success/failure result. This prevents the model from fudging dice.
+        if result.get("requires_roll"):
+            request = result.get("roll") or {}
+            if not isinstance(request, dict):
+                request = {}
+
+            reason = str(request.get("reason") or action).strip()
+            difficulty = str(request.get("difficulty") or "standard").strip().lower()
+            if difficulty not in {
+                "trivial", "easy", "standard", "hard", "very_hard", "extreme"
+            }:
+                difficulty = "standard"
+
+            mechanical_result = resolve_check(
+                reason=reason,
+                difficulty=difficulty,
+                modifier=0,
+            )
+
+            resolved_context = dict(context)
+            resolved_context["mechanical_result"] = mechanical_result
+            resolved_context["mechanical_instruction"] = (
+                "The rules engine has resolved the requested check. Obey this "
+                "result exactly, do not reroll, and narrate its consequence."
+            )
+            result = self.provider.respond(resolved_context)
+            result["requires_roll"] = False
+            result["roll"] = mechanical_result
+
         changes = result.get("state_changes", [])
         self.state.apply_changes(changes)
 
         for memory in result.get("memories", []):
             self._store_memory(memory, default_category="event")
 
-        # The provider can separately return freshly invented world facts such
-        # as a tavern layout, NPC identity, local rumor, landmark, or discovery.
         for note in result.get("world_notes", []):
             self._store_memory(note, default_category="world")
 
-        # Never rely on the model to remember to save the turn. Every completed
-        # exchange gets a compact durable transcript automatically. This gives
-        # retrieval a fallback even if a model forgets to emit memories.
         narration = str(result.get("narration", "")).strip()
         if narration:
+            turn_record = f"Player action: {action}\nGame Master result: {narration}"
+            if mechanical_result:
+                turn_record += (
+                    f"\nMechanical check: {mechanical_result['reason']} | "
+                    f"d20 {mechanical_result['rolls'][0]} + "
+                    f"{mechanical_result['modifier']} = {mechanical_result['total']} "
+                    f"vs DC {mechanical_result['dc']} | "
+                    f"{mechanical_result['outcome']}"
+                )
             self.memory.remember(
-                f"Player action: {action}\nGame Master result: {narration}",
+                turn_record,
                 category="turn",
                 importance=1,
                 confirmed=True,
