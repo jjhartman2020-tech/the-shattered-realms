@@ -99,8 +99,8 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     hit = False if automatic_miss else (True if automatic_hit else total >= armor_class)
 
     crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
-    crit_roll = int(roll("1d100")["total"]) if hit else None
-    critical = bool(hit and crit_roll is not None and crit_roll <= crit_chance)
+    crit_roll = int(roll("1d100")["total"]) if hit and not automatic_hit else None
+    critical = bool(automatic_hit or (hit and crit_roll is not None and crit_roll <= crit_chance))
 
     applied_damage_bonus = int(default_damage_bonus if damage_bonus is None else damage_bonus)
     damage, damage_rolls, raw_damage, resistance_percent = 0, [], 0, 0
