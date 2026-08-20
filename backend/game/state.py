@@ -30,7 +30,9 @@ DEFAULT_STATE = {
         "inventory": [], "equipment": {}, "currency": {"copper": 0, "silver": 0, "gold": 0},
         "features": [], "traits": [], "conditions": [], "location": "unknown",
     },
-    "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {}, "turn": 0,
+    "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {},
+    "combat": {"active": False}, "encounter_template": {}, "encounter_reset_pending": False,
+    "turn": 0,
 }
 
 class GameState:
@@ -58,6 +60,25 @@ class GameState:
 
     def snapshot(self) -> Dict: return deepcopy(self.data)
 
+    def _template_from_combat(self, combat: Dict) -> Dict:
+        if not isinstance(combat, dict):
+            return {}
+        actors = []
+        for raw_actor in combat.get("combatants", []):
+            if not isinstance(raw_actor, dict):
+                continue
+            actor = deepcopy(raw_actor)
+            max_hp = max(0, int(actor.get("max_hp", actor.get("hp", 0)) or 0))
+            max_mana = max(0, int(actor.get("max_mana", actor.get("mana", 0)) or 0))
+            actor["hp"] = max_hp
+            actor["max_hp"] = max_hp
+            actor["mana"] = max_mana
+            actor["max_mana"] = max_mana
+            actor["movement_used"] = 0
+            actor["defeated"] = False
+            actors.append(actor)
+        return {"combatants": actors, "grid": deepcopy(combat.get("grid", {}))}
+
     def apply_changes(self, changes: List[Dict]) -> None:
         if not isinstance(changes, list): changes = []
         for change in changes:
@@ -66,6 +87,12 @@ class GameState:
 
             change_type = str(change.get("type") or "").strip().lower()
             if change_type == "reset_combat_state":
+                current_combat = self.data.get("combat")
+                if isinstance(current_combat, dict) and current_combat.get("combatants"):
+                    existing_template = self.data.get("encounter_template")
+                    if not isinstance(existing_template, dict) or not existing_template.get("combatants"):
+                        self.data["encounter_template"] = self._template_from_combat(current_combat)
+                self.data["encounter_reset_pending"] = True
                 self.data["combat"] = {"active": False}
                 player = self.data.setdefault("player", {})
                 player["combat_position"] = {"x": 0, "y": 0}
