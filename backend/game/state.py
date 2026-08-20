@@ -11,8 +11,20 @@ DEFAULT_STATE = {
     "campaign": {"name": "Untitled Campaign", "genre": "fantasy", "day": 1, "time": "morning"},
     "player": {
         "name": "Traveler", "level": 1, "hp": 10, "max_hp": 10, "mana": 0, "max_mana": 0,
-        "stats": {"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
-        "skills": {"athletics": 0, "stealth": 0, "sleight_of_hand": 0, "perception": 0, "investigation": 0, "survival": 0, "persuasion": 0, "deception": 0, "intimidation": 0},
+        "stats": {
+            "strength": 10,
+            "agility": 10,
+            "speed": 10,
+            "durability": 10,
+            "intelligence": 10,
+            "wisdom": 10,
+            "charisma": 10,
+        },
+        "skills": {
+            "athletics": 0, "acrobatics": 0, "stealth": 0, "sleight_of_hand": 0,
+            "perception": 0, "investigation": 0, "survival": 0,
+            "persuasion": 0, "deception": 0, "intimidation": 0,
+        },
         "inventory": [], "conditions": [], "location": "unknown",
     },
     "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {}, "turn": 0,
@@ -54,8 +66,6 @@ class GameState:
         if not isinstance(changes, list):
             changes = []
         for change in changes:
-            # Model output is untrusted structured data. A malformed entry must
-            # never crash or corrupt the campaign save.
             if not isinstance(change, dict):
                 continue
             path = change.get("path")
