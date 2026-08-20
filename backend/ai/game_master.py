@@ -101,7 +101,6 @@ class GameMaster:
                 if not actor or actor.get("name") != player_name:
                     combat_results.append({"type": "invalid", "reason": "It is not the player's turn."})
                 else:
-                    # Transactional player action: an invalid move+attack must not leave partial movement behind.
                     before_action = deepcopy(active_combat)
                     try:
                         if request_type in {"move", "move_attack"}:
@@ -185,6 +184,18 @@ class GameMaster:
         result["memory_count"] = len(self.memory.all())
         return result
 
+    def _fresh_template_actor(self, raw_actor: Dict) -> Dict:
+        actor = deepcopy(raw_actor)
+        max_hp = max(0, int(actor.get("max_hp", actor.get("hp", 0)) or 0))
+        max_mana = max(0, int(actor.get("max_mana", actor.get("mana", 0)) or 0))
+        actor["hp"] = max_hp
+        actor["max_hp"] = max_hp
+        actor["mana"] = max_mana
+        actor["max_mana"] = max_mana
+        actor["movement_used"] = 0
+        actor["defeated"] = False
+        return actor
+
     def _start_combat(self, request: Dict) -> Dict:
         snapshot = self.state.snapshot()
         player = snapshot.get("player", {})
@@ -194,18 +205,45 @@ class GameMaster:
             "armor_class": int(player.get("armor_class", 10)), "damage": str(player.get("damage", "1d6")), "attack_bonus": int(player.get("attack_bonus", 0)), "position": player.get("combat_position", {"x": 0, "y": 0}),
         })
         combatants = [player_actor]
-        for raw_enemy in request.get("enemies", []):
-            if not isinstance(raw_enemy, dict):
-                continue
-            overrides = {"armor_class": int(raw_enemy.get("armor_class", 10)), "damage": str(raw_enemy.get("damage", "1d4")), "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")), "role": str(raw_enemy.get("role", "fighter")), "attack_bonus": int(raw_enemy.get("attack_bonus", 0))}
-            if raw_enemy.get("position") is not None:
-                overrides["position"] = raw_enemy.get("position")
-            if raw_enemy.get("attack_range") is not None:
-                overrides["attack_range"] = int(raw_enemy.get("attack_range"))
-            combatants.append(build_combatant(str(raw_enemy.get("name") or "Enemy"), "enemy", normalize_attributes(raw_enemy.get("attributes") or {}), level=int(raw_enemy.get("level", 1)), hp=int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None, overrides=overrides))
+
+        reset_pending = bool(snapshot.get("encounter_reset_pending"))
+        template = snapshot.get("encounter_template") if isinstance(snapshot.get("encounter_template"), dict) else {}
+        template_enemies = [
+            self._fresh_template_actor(actor)
+            for actor in template.get("combatants", [])
+            if isinstance(actor, dict) and actor.get("team") == "enemy"
+        ]
+
+        if reset_pending and template_enemies:
+            combatants.extend(template_enemies)
+        else:
+            for raw_enemy in request.get("enemies", []):
+                if not isinstance(raw_enemy, dict):
+                    continue
+                overrides = {"armor_class": int(raw_enemy.get("armor_class", 10)), "damage": str(raw_enemy.get("damage", "1d4")), "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")), "role": str(raw_enemy.get("role", "fighter")), "attack_bonus": int(raw_enemy.get("attack_bonus", 0))}
+                if raw_enemy.get("position") is not None:
+                    overrides["position"] = raw_enemy.get("position")
+                if raw_enemy.get("attack_range") is not None:
+                    overrides["attack_range"] = int(raw_enemy.get("attack_range"))
+                enemy_hp = int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None
+                if enemy_hp is not None:
+                    overrides["max_hp"] = enemy_hp
+                combatants.append(build_combatant(str(raw_enemy.get("name") or "Enemy"), "enemy", normalize_attributes(raw_enemy.get("attributes") or {}), level=int(raw_enemy.get("level", 1)), hp=enemy_hp, overrides=overrides))
+
         if len(combatants) == 1:
             raise ValueError("Combat start requires at least one enemy")
-        return start_combat(combatants)
+
+        combat = start_combat(combatants)
+        pristine = deepcopy(combat)
+        for actor in pristine.get("combatants", []):
+            actor["hp"] = int(actor.get("max_hp", actor.get("hp", 0)))
+            actor["mana"] = int(actor.get("max_mana", actor.get("mana", 0)))
+            actor["movement_used"] = 0
+            actor["defeated"] = False
+        self.state.set_path("encounter_template", {"combatants": pristine.get("combatants", []), "grid": pristine.get("grid", {})}, save=False)
+        self.state.set_path("encounter_reset_pending", False, save=False)
+        self.state.save()
+        return combat
 
     def _run_enemy_turns(self, combat: Dict) -> List[Dict]:
         results: List[Dict] = []
