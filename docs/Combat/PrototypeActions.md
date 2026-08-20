@@ -47,6 +47,14 @@ The combat engine may contain multiple living combatants on either side.
 - Initiative continues through all living combatants, skipping defeated combatants.
 - Enemy target selection should follow `EnemyAI.md`: distance, threat, accessibility, health, positioning, objectives, and information the enemy could reasonably know may influence the choice.
 
+## Encounter Reset and Reconfiguration
+
+- A normal combat reset restores the existing encounter to its pristine pre-fight state.
+- The original enemy roster, max HP, stats, positions, equipment-derived combat values, and other combat data are preserved on a normal reset.
+- If the player explicitly changes the encounter while resetting it, such as adding an archer, removing a guard, or replacing enemies, the revised **complete enemy roster** becomes the template for the next start.
+- A roster change must be stored mechanically; narration alone does not create or remove combatants.
+- After the reconfigured encounter begins, that new roster becomes the pristine template used by future normal resets.
+
 ## Turn Ending
 
 Using a primary action does not automatically end the player's turn. The player may still spend remaining Movement, then explicitly end/pass the turn. Enemy AI completes its chosen action(s) and then advances the turn automatically.
