@@ -6,13 +6,14 @@
 2. Battlefield Positioning
 3. Movement & Positioning
 4. Distance
-5. Cover
-6. Flanking
-7. Reach & Engagement
-8. Line of Sight
-9. Battlefield Control
-10. Balance Philosophy
-11. Future Systems
+5. Prototype Grid Rules
+6. Cover
+7. Flanking
+8. Reach & Engagement
+9. Line of Sight
+10. Battlefield Control
+11. Balance Philosophy
+12. Future Systems
 
 ---
 
@@ -89,6 +90,23 @@ Campaigns may measure distance using any appropriate method, including:
 - Narrative Positioning
 
 The combat framework supports multiple approaches while preserving consistent tactical decision-making.
+
+---
+
+# Prototype Grid Rules
+
+The first playable prototype uses a **square grid**.
+
+- Every combatant has an `(x, y)` square position.
+- Distance is currently measured by orthogonal square steps: horizontal plus vertical distance.
+- A combatant cannot end movement on a square occupied by another active combatant.
+- A combatant may move no farther in one movement action than their current **Movement** value.
+- Movement continues to use the Speed-based formula defined in Stats.md.
+- Standard melee attacks have **range 1 square** unless a weapon, ability, size, or effect states otherwise.
+- Ranged weapons and abilities may define larger attack ranges.
+- An attack against a target outside the attacker's legal range is rejected before any attack roll is made.
+
+These rules are the prototype implementation of the broader positioning framework. Cover, line of sight, flanking, hazards, terrain costs, and more advanced reach rules will layer onto this grid rather than replacing it.
 
 ---
 
@@ -376,4 +394,4 @@ Possible future additions include:
 - Large-Scale Battlefields
 - Campaign-Specific Positioning Rules
 
-Future mechanics should integrate naturally into the positioning system while preserving consistency, tactical depth, and player choice.
+Future mechanics should integrate naturally into the existing positioning system while preserving consistency, tactical depth, and player choice.
