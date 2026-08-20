@@ -8,49 +8,14 @@ from typing import Dict, List
 
 
 DEFAULT_STATE = {
-    "campaign": {
-        "name": "Untitled Campaign",
-        "genre": "fantasy",
-        "day": 1,
-        "time": "morning",
-    },
+    "campaign": {"name": "Untitled Campaign", "genre": "fantasy", "day": 1, "time": "morning"},
     "player": {
-        "name": "Traveler",
-        "level": 1,
-        "hp": 10,
-        "max_hp": 10,
-        "mana": 0,
-        "max_mana": 0,
-        "stats": {
-            "strength": 10,
-            "dexterity": 10,
-            "constitution": 10,
-            "intelligence": 10,
-            "wisdom": 10,
-            "charisma": 10,
-        },
-        "skills": {
-            "athletics": 0,
-            "stealth": 0,
-            "sleight_of_hand": 0,
-            "perception": 0,
-            "investigation": 0,
-            "survival": 0,
-            "persuasion": 0,
-            "deception": 0,
-            "intimidation": 0,
-        },
-        "inventory": [],
-        "conditions": [],
-        "location": "unknown",
+        "name": "Traveler", "level": 1, "hp": 10, "max_hp": 10, "mana": 0, "max_mana": 0,
+        "stats": {"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+        "skills": {"athletics": 0, "stealth": 0, "sleight_of_hand": 0, "perception": 0, "investigation": 0, "survival": 0, "persuasion": 0, "deception": 0, "intimidation": 0},
+        "inventory": [], "conditions": [], "location": "unknown",
     },
-    "party": [],
-    "npcs": {},
-    "factions": {},
-    "locations": {},
-    "quests": {},
-    "world_flags": {},
-    "turn": 0,
+    "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {}, "turn": 0,
 }
 
 
@@ -61,7 +26,6 @@ class GameState:
         default_path = os.getenv("SHATTERED_REALMS_STATE_FILE", "data/campaign_state.json")
         self.path = Path(path or default_path)
         self.data = deepcopy(DEFAULT_STATE)
-
         saved = self._load()
         if saved:
             self._deep_merge(self.data, saved)
@@ -80,19 +44,22 @@ class GameState:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(self.data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        temporary.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.path)
 
     def snapshot(self) -> Dict:
         return deepcopy(self.data)
 
     def apply_changes(self, changes: List[Dict]) -> None:
+        if not isinstance(changes, list):
+            changes = []
         for change in changes:
+            # Model output is untrusted structured data. A malformed entry must
+            # never crash or corrupt the campaign save.
+            if not isinstance(change, dict):
+                continue
             path = change.get("path")
-            if not path or "value" not in change:
+            if not isinstance(path, str) or not path.strip() or "value" not in change:
                 continue
             self.set_path(path, change["value"], save=False)
         self.data["turn"] = int(self.data.get("turn", 0)) + 1
