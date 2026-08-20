@@ -5,6 +5,23 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+PROTOTYPE_POWER_STRIKE = {
+    "name": "Power Strike",
+    "description": "A committed melee strike used to test active ability rules.",
+    "type": "active",
+    "category": "offensive",
+    "resource": "mana",
+    "resource_cost": 1,
+    "cooldown": 1,
+    "target": "enemy",
+    "range": 1,
+    "requires_attack_roll": True,
+    "attack_attribute": "strength",
+    "damage": "1d8",
+    "damage_bonus_attribute": "strength",
+    "prototype": True,
+}
+
 DEFAULT_STATE = {
     "campaign": {"name": "Untitled Campaign", "genre": "fantasy", "day": 1, "time": "morning"},
     "player": {
@@ -13,7 +30,7 @@ DEFAULT_STATE = {
         "attribute_points_unspent": 60, "ability_points": 0,
         "stats": {
             "health": 0, "mana": 0, "strength": 0, "dexterity": 0, "constitution": 0,
-            "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0,
+            "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0, "defense": 0,
         },
         "hp": 0, "max_hp": 0, "temporary_hp": 0, "mana": 0, "max_mana": 0,
         "armor_class": 10, "initiative_bonus": 0, "movement": 6,
@@ -27,6 +44,8 @@ DEFAULT_STATE = {
         "death_saves": {"successes": 0, "failures": 0},
         "spellcasting": {"ability": None, "spell_save_dc": 0, "spell_attack_bonus": 0,
                          "cantrips": [], "spells_known": []},
+        "unlocked_abilities": [deepcopy(PROTOTYPE_POWER_STRIKE)],
+        "equipped_abilities": [deepcopy(PROTOTYPE_POWER_STRIKE)],
         "inventory": [], "equipment": {}, "currency": {"copper": 0, "silver": 0, "gold": 0},
         "features": [], "traits": [], "conditions": [], "location": "unknown",
     },
@@ -79,6 +98,7 @@ class GameState:
             actor["primary_action_used"] = False
             actor["defending"] = False
             actor["active_defense_ac_bonus"] = 0
+            actor["ability_cooldowns"] = {}
             actor["defeated"] = False
             actors.append(actor)
         return {"combatants": actors, "grid": deepcopy(combat.get("grid", {}))}
