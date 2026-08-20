@@ -7,6 +7,7 @@ from .context import ContextBuilder
 from .memory import CampaignMemory
 from .provider import provider_from_environment
 from .rules import RuleLibrary
+from backend.game.abilities import resolve_ability
 from backend.game.attributes import SKILL_ATTRIBUTE, attribute_check_bonus, build_combatant, normalize_attributes
 from backend.game.checks import resolve_check
 from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack, start_combat
@@ -22,7 +23,7 @@ SKILL_ALIASES = {
     "intimidation": "intimidation", "intimidate": "intimidation", "insight": "insight", "medicine": "medicine",
     "nature": "nature", "performance": "performance", "religion": "religion", "history": "history",
 }
-ATTRIBUTE_ALIASES = {k: k for k in ("health", "mana", "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma", "speed")}
+ATTRIBUTE_ALIASES = {k: k for k in ("health", "mana", "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense")}
 ATTRIBUTE_ALIASES.update({"agility": "dexterity", "durability": "constitution"})
 ATTRIBUTE_REASON_HINTS = {
     "strength": ("force", "lift", "break", "shove", "grapple", "overpower", "push", "pull"),
@@ -32,6 +33,7 @@ ATTRIBUTE_REASON_HINTS = {
     "wisdom": ("notice", "sense", "track", "intuition", "heal", "survive"),
     "charisma": ("convince", "persuade", "deceive", "intimidate", "perform", "negotiate"),
     "speed": ("sprint", "race", "outrun", "react quickly", "catch up"),
+    "defense": ("defend", "guard", "brace", "block", "protect"),
 }
 
 
@@ -95,7 +97,7 @@ class GameMaster:
                 combat_results.extend(self._run_enemy_turns(active_combat))
                 self._persist_combat(active_combat)
 
-            elif request_type in {"attack", "move", "move_attack", "defend", "end_turn", "pass"} and isinstance(active_combat, dict) and active_combat.get("active"):
+            elif request_type in {"attack", "move", "move_attack", "ability", "defend", "end_turn", "pass"} and isinstance(active_combat, dict) and active_combat.get("active"):
                 actor = current_actor(active_combat)
                 player_name = str(snapshot.get("player", {}).get("name") or "Traveler")
                 if not actor or actor.get("name") != player_name:
@@ -113,6 +115,11 @@ class GameMaster:
                                 attack_attribute = "strength"
                             attack_result = resolve_attack(active_combat, player_name, target, attack_attribute=attack_attribute, enforce_turn=True)
                             combat_results.append({"type": "player_attack", **attack_result})
+                        elif request_type == "ability":
+                            ability_name = str(combat_request.get("ability") or "").strip()
+                            target = str(combat_request.get("target") or "").strip() or None
+                            ability_result = resolve_ability(active_combat, player_name, ability_name, target, enforce_turn=True)
+                            combat_results.append({"type": "player_ability", **ability_result})
                         elif request_type == "defend":
                             defense = defend_actor(active_combat, player_name, enforce_turn=True)
                             combat_results.append({"type": "player_defend", **defense})
@@ -131,8 +138,8 @@ class GameMaster:
             resolved_context["active_combat"] = active_combat
             resolved_context["combat_result"] = combat_results
             resolved_context["mechanical_instruction"] = (
-                "Python has resolved combat. Narrate movement, remaining movement, primary-action use, defending, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
-                "Positions, action availability, defense state, and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, or alter the results."
+                "Python has resolved combat. Narrate movement, remaining movement, primary-action use, abilities, resource costs, cooldowns, defending, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
+                "Positions, resources, action availability, defense state, and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, resources, cooldowns, or alter the results."
             )
             narrated = self.provider.respond(resolved_context)
             narrated["combat_request"] = None
@@ -195,6 +202,8 @@ class GameMaster:
         actor["movement_used"] = 0
         actor["primary_action_used"] = False
         actor["defending"] = False
+        actor["active_defense_ac_bonus"] = 0
+        actor["ability_cooldowns"] = {}
         actor["defeated"] = False
         return actor
 
@@ -210,6 +219,8 @@ class GameMaster:
             overrides["position"] = raw_enemy.get("position")
         if raw_enemy.get("attack_range") is not None:
             overrides["attack_range"] = int(raw_enemy.get("attack_range"))
+        if isinstance(raw_enemy.get("abilities"), list):
+            overrides["abilities"] = deepcopy(raw_enemy.get("abilities"))
         enemy_hp = int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None
         if enemy_hp is not None:
             overrides["max_hp"] = enemy_hp
@@ -228,7 +239,11 @@ class GameMaster:
         player_name = str(player.get("name") or "Traveler")
         attributes = normalize_attributes(player.get("stats") or player.get("attributes") or {})
         player_actor = build_combatant(player_name, "player", attributes, level=int(player.get("level", 1)), hp=int(player.get("hp", 0)) if int(player.get("hp", 0)) > 0 else None, overrides={
-            "armor_class": int(player.get("armor_class", 10)), "damage": str(player.get("damage", "1d6")), "attack_bonus": int(player.get("attack_bonus", 0)), "position": player.get("combat_position", {"x": 0, "y": 0}),
+            "armor_class": int(player.get("armor_class", 10)),
+            "damage": str(player.get("damage", "1d6")),
+            "attack_bonus": int(player.get("attack_bonus", 0)),
+            "position": player.get("combat_position", {"x": 0, "y": 0}),
+            "abilities": deepcopy(player.get("equipped_abilities", [])) if isinstance(player.get("equipped_abilities"), list) else [],
         })
         combatants = [player_actor]
 
@@ -245,9 +260,6 @@ class GameMaster:
         ] if isinstance(snapshot.get("pending_encounter_enemies"), list) else []
         request_specs = [enemy for enemy in request.get("enemies", []) if isinstance(enemy, dict)]
 
-        # A reset with an explicitly reconfigured enemy list must replace the old template.
-        # A plain reset reuses the pristine old template exactly, even if the AI happens to
-        # regenerate enemy data in the following start request.
         if reset_pending and pending_specs:
             combatants.extend(self._build_enemy_from_spec(enemy) for enemy in pending_specs)
         elif reset_pending and template_enemies:
@@ -266,6 +278,8 @@ class GameMaster:
             actor["movement_used"] = 0
             actor["primary_action_used"] = False
             actor["defending"] = False
+            actor["active_defense_ac_bonus"] = 0
+            actor["ability_cooldowns"] = {}
             actor["defeated"] = False
         self.state.set_path("encounter_template", {"combatants": pristine.get("combatants", []), "grid": pristine.get("grid", {})}, save=False)
         self.state.set_path("encounter_reset_pending", False, save=False)
@@ -283,7 +297,7 @@ class GameMaster:
                 break
             snapshot = self.state.snapshot()
             player_name = str(snapshot.get("player", {}).get("name") or "Traveler")
-            enemy_context = self.context_builder.build(player_action=f"Enemy turn: {actor.get('name')}", game_state=snapshot, memories=self.memory.context_for(str(actor.get("name"))), rules=self.rules.retrieve("enemy combat tactics target selection positioning movement defend"))
+            enemy_context = self.context_builder.build(player_action=f"Enemy turn: {actor.get('name')}", game_state=snapshot, memories=self.memory.context_for(str(actor.get("name"))), rules=self.rules.retrieve("enemy combat tactics target selection positioning movement defend abilities resources"))
             enemy_context["active_combat"] = combat
             enemy_context["enemy_turn"] = {"actor": actor, "instruction": "Choose a legal tactical action using only information this enemy could know."}
             decision = self.provider.respond(enemy_context)
@@ -301,6 +315,11 @@ class GameMaster:
                         attack_attribute = "strength"
                     attack = resolve_attack(combat, str(actor.get("name")), target, attack_attribute=attack_attribute, enforce_turn=True)
                     results.append({"type": "enemy_attack", **attack})
+                elif request_type == "ability":
+                    ability_name = str(request.get("ability") or "").strip()
+                    target = str(request.get("target") or player_name).strip() or None
+                    ability_result = resolve_ability(combat, str(actor.get("name")), ability_name, target, enforce_turn=True)
+                    results.append({"type": "enemy_ability", **ability_result})
                 elif request_type == "defend":
                     defense = defend_actor(combat, str(actor.get("name")), enforce_turn=True)
                     results.append({"type": "enemy_defend", **defense})
