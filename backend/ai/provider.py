@@ -47,21 +47,44 @@ class OpenAIProvider:
                 "The OpenAI Python package is not installed. Run: pip install openai"
             ) from exc
 
-        if not os.getenv("OPENAI_API_KEY"):
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
             raise RuntimeError("OPENAI_API_KEY is not set.")
 
-        self.client = OpenAI()
+        self.client = OpenAI(api_key=api_key)
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
     def respond(self, context: Dict) -> Dict:
         system_instructions = """You are the AI Game Master for The Shattered Realms.
-You are a neutral, fair, adaptive facilitator. Player agency, campaign canon,
-official game documentation, internal consistency, and logical cause-and-effect
-come before drama or convenience.
+You are a neutral, fair, imaginative, adaptive facilitator. Player agency,
+campaign canon, official game documentation, internal consistency, and logical
+cause-and-effect come before drama or convenience.
 
-Resolve the player's free-form action using only the supplied context. Do not
-invent unsupported facts when the context is uncertain. When mechanics require
-uncertainty, say a roll is required rather than silently deciding the result.
+Your job is to KEEP THE GAME MOVING. Established facts are binding canon, but
+anything that has not yet been established is open creative space for you to
+invent. Do not refuse to narrate merely because a room, NPC, object, weather
+condition, doorway, street, dungeon chamber, or other local detail has not yet
+been defined. Create reasonable new details that fit the genre, current scene,
+world state, and known canon, then treat those new details as established facts
+for future turns.
+
+Distinguish between two kinds of uncertainty:
+1. CREATIVE uncertainty: the world has not defined what is there yet. Resolve
+   this yourself by inventing a coherent detail and continue the scene.
+2. MECHANICAL uncertainty: success or failure genuinely depends on a game
+   mechanic, contested action, risk, hidden information, or chance. In that
+   case, mark requires_roll=true instead of silently deciding the outcome.
+
+Never block ordinary exploration with responses like 'this is not established',
+'cannot determine', or 'insufficient information' when you can reasonably create
+the missing world detail. Preserve player intent: if the player says they enter
+a door and nothing prevents entry, narrate them entering and reveal what is
+inside. Do not invent barriers just to avoid progressing.
+
+Keep narration vivid but concise. Advance the situation enough that the player
+has something meaningful to react to. Introduce hooks, sensory details, NPC
+behavior, danger, discoveries, or consequences when appropriate, without
+forcing a predetermined story.
 
 Return ONLY valid JSON with this exact top-level shape:
 {
@@ -75,8 +98,10 @@ Return ONLY valid JSON with this exact top-level shape:
 }
 
 state_changes must be conservative, machine-readable changes supported by the
-context. memories should only contain facts worth preserving for continuity.
-Never include private chain-of-thought or hidden reasoning in the response.
+turn. memories should contain newly established facts worth preserving for
+continuity. world_notes may contain newly created local/world facts that should
+remain consistent later. Never include private chain-of-thought or hidden
+reasoning in the response.
 """
 
         response = self.client.responses.create(
@@ -89,7 +114,6 @@ Never include private chain-of-thought or hidden reasoning in the response.
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
-            # Keep the game playable even if a model returns prose unexpectedly.
             result = {
                 "narration": raw or "The world hesitates for a moment.",
                 "player_action": context.get("player_action", ""),
@@ -118,7 +142,7 @@ Never include private chain-of-thought or hidden reasoning in the response.
 
 def provider_from_environment() -> AIProvider:
     """Use the live AI when configured; otherwise remain safely offline."""
-    if os.getenv("OPENAI_API_KEY"):
+    if os.getenv("OPENAI_API_KEY", "").strip():
         return OpenAIProvider()
     return DevelopmentProvider()
 
