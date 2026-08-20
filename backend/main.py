@@ -3,6 +3,37 @@
 from backend.ai.game_master import GameMaster
 
 
+def _format_damage_breakdown(event) -> str:
+    """Return a readable breakdown of the engine-resolved attack damage."""
+    rolls = event.get("damage_rolls") or []
+    weapon_damage = 0
+    critical_dice_damage = 0
+    if isinstance(rolls, list) and rolls:
+        first = rolls[0]
+        if isinstance(first, dict):
+            weapon_damage = int(first.get("total", 0) or 0)
+        if len(rolls) > 1:
+            for extra in rolls[1:]:
+                if isinstance(extra, dict):
+                    critical_dice_damage += int(extra.get("total", 0) or 0)
+
+    stat_damage_bonus = int(event.get("damage_bonus", 0) or 0)
+    accuracy_damage_bonus = int(event.get("accuracy_margin_damage_bonus", 0) or 0)
+    resistance = int(event.get("physical_resistance_percent", 0) or 0)
+
+    parts = [f"Weapon: {weapon_damage}"]
+    if stat_damage_bonus:
+        label = "STR" if event.get("attack_attribute") == "strength" else "Stat"
+        parts.append(f"{label}: {stat_damage_bonus:+d}")
+    if accuracy_damage_bonus:
+        parts.append(f"Accuracy: {accuracy_damage_bonus:+d}")
+    if critical_dice_damage:
+        parts.append(f"Crit Dice: +{critical_dice_damage}")
+    if resistance:
+        parts.append(f"Resistance: {resistance}%")
+    return " | ".join(parts)
+
+
 def _print_combat_results(results) -> None:
     if not isinstance(results, list):
         return
@@ -26,8 +57,9 @@ def _print_combat_results(results) -> None:
             print(f"d20: {d20} {sign} {abs(bonus)} = {total} vs AC {ac} — {hit_text}")
             if event.get("hit"):
                 crit = " CRITICAL!" if event.get("critical") else ""
+                breakdown = _format_damage_breakdown(event)
                 print(
-                    f"Damage: {event.get('damage')} | {target} HP: "
+                    f"Damage: {event.get('damage')} [{breakdown}] | {target} HP: "
                     f"{event.get('target_hp')}/{event.get('target_max_hp')}{crit}"
                 )
                 if event.get("target_defeated"):
