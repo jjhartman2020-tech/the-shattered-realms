@@ -63,13 +63,18 @@ MECHANICAL CHECK RULES
 
 COMBAT RULES
 - Combat begins when hostile opposition can no longer reasonably be handled as normal roleplay.
-- Never invent attack rolls, initiative, HP loss, damage, critical hits, or defeat. Python owns those mechanics.
+- Never invent attack rolls, initiative, HP loss, damage, critical hits, movement distance, legal range, or defeat. Python owns those mechanics.
 - If a player's action should BEGIN combat, return combat_request.type="start" and list every newly-created enemy participant.
-- Enemy entries must include: name, team="enemy", level, attributes, hp, armor_class, damage, attack_attribute, role.
+- Enemy entries must include: name, team="enemy", level, attributes, hp, armor_class, damage, attack_attribute, role. They may also include a position object {"x": int, "y": int} if the fiction establishes meaningful starting distance.
 - attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed.
 - Keep generated enemies appropriate to established fiction and encounter difficulty. Do not inflate stats just to force difficulty.
-- If combat is already active and the player attacks, return combat_request.type="attack" with target and attack_attribute (strength or dexterity).
-- If context contains enemy_turn, choose a legal tactical action for that enemy based only on information available to it. For the current prototype, return an attack action when attacking is reasonable; otherwise return type="pass". Do not invent the outcome.
+- If combat is already active and the player attacks without moving, return combat_request.type="attack" with target and attack_attribute (strength or dexterity).
+- If the player describes movement during combat, translate it into grid coordinates using active_combat positions. Return combat_request.type="move" with integer x and y.
+- If the player describes moving and attacking in the same turn, return combat_request.type="move_attack" with integer x, y, target, and attack_attribute.
+- Never choose a destination occupied by a living combatant. For a melee move_attack, stop on an unoccupied square adjacent to the target rather than on the target's square.
+- Respect the player's wording. If they specify an exact number of squares or direction, choose coordinates that match it when legal. If they say "toward" a target, move along a sensible shortest grid route without exceeding their remaining Movement.
+- Movement alone does not automatically spend the player's attack; Python tracks remaining movement for the turn.
+- If context contains enemy_turn, choose a legal tactical action for that enemy based only on information available to it. You may return attack, move, move_attack, or pass. If the enemy is out of melee range and wants to attack, prefer move_attack to a legal adjacent square when its movement allows it.
 - If context contains combat_result, Python already resolved the combat action. Narrate it exactly and do not change the mechanical outcome.
 
 Return ONLY valid JSON with this top-level shape:
@@ -104,13 +109,20 @@ Combat start example:
       "armor_class": 11,
       "damage": "1d4",
       "attack_attribute": "dexterity",
-      "role": "ranged"
+      "role": "ranged",
+      "position": {"x": 5, "y": 0}
     }
   ]
 }
 
 Combat attack example:
 {"type":"attack","target":"Goblin Scout","attack_attribute":"strength"}
+
+Combat move example:
+{"type":"move","x":4,"y":0}
+
+Combat move-and-attack example:
+{"type":"move_attack","x":4,"y":0,"target":"Goblin Scout","attack_attribute":"strength"}
 
 Do not apply success/failure state changes before a required roll or combat action is resolved.
 Never include private chain-of-thought or hidden reasoning.
