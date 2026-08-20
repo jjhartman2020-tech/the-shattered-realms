@@ -155,6 +155,8 @@ Base critical chance is 5% unless a weapon, ability, or campaign rule states oth
 
 At 30 Dexterity, natural critical chance is 15% before other effects.
 
+A **natural 20 on an attack roll is always a critical hit** regardless of the normal critical-chance roll. A critical hit rolls the attack's weapon damage dice one additional time, while flat damage bonuses are added only once. Non-natural-20 hits may still become critical hits through the normal Critical Chance formula.
+
 ## Physical Resistance
 
 `Physical Resistance = floor(Constitution / 3)%`
