@@ -1,13 +1,20 @@
 """Persistent campaign memory primitives for the AI Game Master."""
 
-from typing import Dict, List, Optional
+import json
+from pathlib import Path
+from typing import Dict, List
+
+
+DEFAULT_MEMORY_PATH = Path(".shattered_realms/default_campaign_memory.json")
 
 
 class CampaignMemory:
-    """Stores confirmed campaign events and retrieves useful recent context."""
+    """Stores confirmed campaign facts and persists them between game sessions."""
 
-    def __init__(self) -> None:
+    def __init__(self, path: str | Path = DEFAULT_MEMORY_PATH) -> None:
+        self.path = Path(path)
         self._events: List[Dict] = []
+        self.load()
 
     def remember(
         self,
@@ -22,9 +29,19 @@ class CampaignMemory:
             "importance": max(1, min(5, importance)),
             "confirmed": confirmed,
         }
-        if memory["text"]:
+        if memory["text"] and not self._is_duplicate(memory):
             self._events.append(memory)
+            self.save()
         return memory
+
+    def _is_duplicate(self, memory: Dict) -> bool:
+        text = memory.get("text", "").strip().lower()
+        category = memory.get("category", "event")
+        return any(
+            event.get("text", "").strip().lower() == text
+            and event.get("category", "event") == category
+            for event in self._events
+        )
 
     def recent(self, limit: int = 12, confirmed_only: bool = True) -> List[Dict]:
         events = self._events
@@ -45,6 +62,44 @@ class CampaignMemory:
                 scored.append((score, event))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [event for _, event in scored[:limit]]
+
+    def context_for(self, query: str, limit: int = 12) -> List[Dict]:
+        """Blend relevant memories with recent canon so continuity is preserved."""
+        selected: List[Dict] = []
+        seen = set()
+
+        for event in self.search(query, limit=limit):
+            key = (event.get("category"), event.get("text"))
+            if key not in seen:
+                selected.append(event)
+                seen.add(key)
+
+        for event in reversed(self.recent(limit=limit)):
+            key = (event.get("category"), event.get("text"))
+            if key not in seen:
+                selected.append(event)
+                seen.add(key)
+            if len(selected) >= limit:
+                break
+
+        return selected[:limit]
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            json.dumps(self._events, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        if isinstance(data, list):
+            self._events = [item for item in data if isinstance(item, dict)]
 
     def all(self) -> List[Dict]:
         return list(self._events)
