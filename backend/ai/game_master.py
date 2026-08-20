@@ -11,6 +11,39 @@ from backend.game.state import GameState
 from backend.game.world import WorldSimulator
 
 
+SKILL_ALIASES = {
+    "athletics": "athletics",
+    "strength": "athletics",
+    "stealth": "stealth",
+    "sneak": "stealth",
+    "sleight of hand": "sleight_of_hand",
+    "sleight_of_hand": "sleight_of_hand",
+    "pickpocket": "sleight_of_hand",
+    "perception": "perception",
+    "investigation": "investigation",
+    "survival": "survival",
+    "persuasion": "persuasion",
+    "persuade": "persuasion",
+    "deception": "deception",
+    "deceive": "deception",
+    "intimidation": "intimidation",
+    "intimidate": "intimidation",
+}
+
+
+def _skill_for_check(request: Dict, reason: str) -> str | None:
+    """Normalize an AI-requested skill, with a conservative reason fallback."""
+    requested = str(request.get("skill") or "").strip().lower().replace("-", " ")
+    if requested in SKILL_ALIASES:
+        return SKILL_ALIASES[requested]
+
+    text = reason.lower()
+    for phrase, skill in SKILL_ALIASES.items():
+        if phrase.replace("_", " ") in text:
+            return skill
+    return None
+
+
 class GameMaster:
     """Coordinates player freedom, rules, memory, AI reasoning, and world state."""
 
@@ -50,8 +83,6 @@ class GameMaster:
         result = self.provider.respond(context)
         mechanical_result = None
 
-        # The AI may REQUEST a check, but Python owns the actual random roll and
-        # success/failure result. This prevents the model from fudging dice.
         if result.get("requires_roll"):
             request = result.get("roll") or {}
             if not isinstance(request, dict):
@@ -64,17 +95,24 @@ class GameMaster:
             }:
                 difficulty = "standard"
 
+            skill = _skill_for_check(request, reason)
+            player = self.state.snapshot().get("player", {})
+            skills = player.get("skills", {}) if isinstance(player, dict) else {}
+            modifier = int(skills.get(skill, 0)) if skill else 0
+
             mechanical_result = resolve_check(
                 reason=reason,
                 difficulty=difficulty,
-                modifier=0,
+                modifier=modifier,
             )
+            mechanical_result["skill"] = skill
 
             resolved_context = dict(context)
             resolved_context["mechanical_result"] = mechanical_result
             resolved_context["mechanical_instruction"] = (
-                "The rules engine has resolved the requested check. Obey this "
-                "result exactly, do not reroll, and narrate its consequence."
+                "The rules engine has resolved the requested check using the "
+                "character's stored skill modifier. Obey this result exactly, "
+                "do not reroll, and narrate its consequence."
             )
             result = self.provider.respond(resolved_context)
             result["requires_roll"] = False
@@ -95,6 +133,7 @@ class GameMaster:
             if mechanical_result:
                 turn_record += (
                     f"\nMechanical check: {mechanical_result['reason']} | "
+                    f"skill {mechanical_result.get('skill') or 'none'} | "
                     f"d20 {mechanical_result['rolls'][0]} + "
                     f"{mechanical_result['modifier']} = {mechanical_result['total']} "
                     f"vs DC {mechanical_result['dc']} | "
