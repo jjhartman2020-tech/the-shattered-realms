@@ -43,20 +43,25 @@ MECHANICAL CHECK RULES
 - When context contains mechanical_result, Python has resolved the roll. Obey it exactly.
 
 COMBAT RULES
-- Python is authoritative for initiative, positions, movement, range, attack rolls, HP, damage, critical hits, defeat, and turn progression.
+- Python is authoritative for initiative, positions, movement, primary-action use, defense state, range, attack rolls, HP, damage, critical hits, defeat, and turn progression.
 - Never invent or silently change those values.
+- Each combatant normally has one primary action per turn. Movement uses a separate movement budget and does not consume the primary action.
+- A basic attack consumes the primary action. Defend consumes the primary action. Movement may happen before or after the primary action if movement remains.
+- Defend grants +2 AC until the start of that combatant's next turn. Python resolves this; do not alter the bonus.
 - To begin combat return combat_request.type=\"start\" with every newly-created enemy.
 - Enemy entries include name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, and role. Position and attack_range may be included when established.
 - Attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed.
-- During active combat use attack, move, move_attack, end_turn, or pass.
+- During active combat use attack, move, move_attack, defend, end_turn, or pass.
+- If the player says they defend, guard, brace, take a defensive stance, or focus on defense, return {\"type\":\"defend\"}.
 - If the player says they end their turn, wait, pass, hold position, or otherwise deliberately finish without another action, return {\"type\":\"end_turn\"}. Do NOT merely narrate that their turn ended.
 - For move return integer x and y. For move_attack return x, y, target, and attack_attribute.
 - active_combat positions are authoritative. Compute destinations from the current positions in active_combat, never from an earlier narration or memory.
 - Never choose a destination occupied by a living combatant. A melee move_attack must stop on an unoccupied square adjacent to the target.
 - Respect exact requested square counts/directions when legal. For \"toward\" or \"next to\", choose a shortest legal destination within remaining movement.
-- Movement alone does not end the player's turn or spend their attack.
+- Movement alone does not end the player's turn or spend their primary action.
+- After a player attacks or defends, do not automatically end their turn; they may still move if movement remains, then explicitly end the turn.
 - A combined move_attack is one atomic intended action. Python may reject the whole action; if combat_result says invalid, narrate that no part of the attempted combined action occurred.
-- If context contains enemy_turn, choose attack, move, move_attack, or pass using only information the enemy could know.
+- If context contains enemy_turn, choose attack, move, move_attack, defend, or pass using only information the enemy could know.
 - If context contains combat_result, narrate it exactly. Do not issue another combat request, reroll, move anyone again, or alter mechanics.
 
 Return ONLY valid JSON with this top-level shape:
@@ -67,6 +72,7 @@ Combat examples:
 {\"type\":\"attack\",\"target\":\"Goblin Scout\",\"attack_attribute\":\"strength\"}
 {\"type\":\"move\",\"x\":4,\"y\":0}
 {\"type\":\"move_attack\",\"x\":4,\"y\":0,\"target\":\"Goblin Scout\",\"attack_attribute\":\"strength\"}
+{\"type\":\"defend\"}
 {\"type\":\"end_turn\"}
 
 Do not apply success/failure state changes before a required roll or combat action is resolved. Never include private chain-of-thought or hidden reasoning.
