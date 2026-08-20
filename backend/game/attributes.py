@@ -8,12 +8,11 @@ The AI may choose context, but the engine owns mechanical values.
 """
 
 from copy import deepcopy
-from math import floor
 from typing import Dict
 
 ATTRIBUTE_NAMES = (
     "health", "mana", "strength", "dexterity", "constitution",
-    "intelligence", "wisdom", "charisma", "speed",
+    "intelligence", "wisdom", "charisma", "speed", "defense",
 )
 
 STARTING_ATTRIBUTE_POINTS = 60
@@ -45,7 +44,7 @@ def normalize_attributes(attributes: Dict | None = None) -> Dict[str, int]:
     result = deepcopy(DEFAULT_ATTRIBUTES)
     if not isinstance(attributes, dict):
         return result
-    aliases = {"agility": "dexterity", "durability": "constitution"}
+    aliases = {"agility": "dexterity", "durability": "constitution", "defence": "defense"}
     for raw_name, raw_value in attributes.items():
         name = aliases.get(raw_name, raw_name)
         if name in result:
@@ -118,6 +117,11 @@ def defense_bonus(dexterity: int, constitution: int, speed: int) -> int:
     return max(0, int(dexterity)) // 9 + max(0, int(constitution)) // 15 + max(0, int(speed)) // 15
 
 
+def defend_action_ac_bonus(defense: int) -> int:
+    """Defend action: every complete 3 Defense points grant +1 temporary AC."""
+    return attribute_check_bonus(defense)
+
+
 def initiative_bonus(speed: int, dexterity: int) -> int:
     return max(0, int(speed)) // 3 + max(0, int(dexterity)) // 6
 
@@ -146,6 +150,7 @@ def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> 
         "wisdom_rating": a["wisdom"],
         "charisma_rating": a["charisma"],
         "speed_rating": a["speed"],
+        "defense_rating": a["defense"],
         "strength_check_bonus": attribute_check_bonus(a["strength"]),
         "dexterity_check_bonus": attribute_check_bonus(a["dexterity"]),
         "constitution_check_bonus": attribute_check_bonus(a["constitution"]),
@@ -153,6 +158,7 @@ def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> 
         "wisdom_check_bonus": attribute_check_bonus(a["wisdom"]),
         "charisma_check_bonus": attribute_check_bonus(a["charisma"]),
         "speed_check_bonus": attribute_check_bonus(a["speed"]),
+        "defense_check_bonus": attribute_check_bonus(a["defense"]),
         "strength_attack_accuracy": attack_accuracy_bonus(a["strength"]),
         "dexterity_attack_accuracy": attack_accuracy_bonus(a["dexterity"]),
         "strength_damage_bonus": strength_damage_bonus(a["strength"]),
@@ -160,6 +166,7 @@ def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> 
         "physical_resistance_percent": physical_resistance(a["constitution"]),
         "status_resistance_percent": status_resistance(a["constitution"]),
         "defense_bonus": defense_bonus(a["dexterity"], a["constitution"], a["speed"]),
+        "defend_action_ac_bonus": defend_action_ac_bonus(a["defense"]),
         "initiative_bonus": initiative_bonus(a["speed"], a["dexterity"]),
         "movement": movement_spaces(a["speed"]),
         "trading_influence_percent": trading_influence(a["charisma"]),
@@ -187,6 +194,7 @@ def build_combatant(name: str, team: str, attributes: Dict | None = None, *,
         "armor_class": BASE_ARMOR_CLASS + sheet["defense_bonus"],
         "initiative_bonus": sheet["initiative_bonus"],
         "movement": sheet["movement"],
+        "defend_action_ac_bonus": sheet["defend_action_ac_bonus"],
         "critical_chance_percent": sheet["critical_chance_percent"],
         "physical_resistance_percent": sheet["physical_resistance_percent"],
         "status_resistance_percent": sheet["status_resistance_percent"],
