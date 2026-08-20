@@ -8,12 +8,15 @@ from typing import Dict, List
 DEFAULT_STATE = {
     "campaign": {"name": "Untitled Campaign", "genre": "fantasy", "day": 1, "time": "morning"},
     "player": {
-        "name": "Traveler", "level": 1, "experience": 0, "class": "unassigned", "subclass": None,
-        "background": None, "species": None, "alignment": None, "inspiration": 0,
-        "hp": 10, "max_hp": 10, "temporary_hp": 0, "mana": 0, "max_mana": 0,
+        "name": "Traveler", "level": 1, "xp_orbs": 0, "class": "unassigned", "subclass": None,
+        "background": None, "species": None, "inspiration": 0,
+        "attribute_points_unspent": 60, "ability_points": 0,
+        "stats": {
+            "health": 0, "mana": 0, "strength": 0, "dexterity": 0, "constitution": 0,
+            "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0,
+        },
+        "hp": 0, "max_hp": 0, "temporary_hp": 0, "mana": 0, "max_mana": 0,
         "armor_class": 10, "initiative_bonus": 0, "movement": 6,
-        "stats": {"strength": 10, "dexterity": 10, "constitution": 10,
-                  "intelligence": 10, "wisdom": 10, "charisma": 10, "speed": 10},
         "saving_throw_proficiencies": [], "skill_proficiencies": [], "expertise": [],
         "skills": {"acrobatics": 0, "animal_handling": 0, "arcana": 0, "athletics": 0,
                    "deception": 0, "history": 0, "insight": 0, "intimidation": 0,
@@ -21,9 +24,9 @@ DEFAULT_STATE = {
                    "performance": 0, "persuasion": 0, "religion": 0,
                    "sleight_of_hand": 0, "stealth": 0, "survival": 0},
         "proficiencies": {"armor": [], "weapons": [], "tools": [], "languages": []},
-        "hit_dice": "1d8", "death_saves": {"successes": 0, "failures": 0},
+        "death_saves": {"successes": 0, "failures": 0},
         "spellcasting": {"ability": None, "spell_save_dc": 0, "spell_attack_bonus": 0,
-                         "cantrips": [], "spells_known": [], "spell_slots": {}},
+                         "cantrips": [], "spells_known": []},
         "inventory": [], "equipment": {}, "currency": {"copper": 0, "silver": 0, "gold": 0},
         "features": [], "traits": [], "conditions": [], "location": "unknown",
     },
@@ -37,10 +40,8 @@ class GameState:
         self.path = Path(path or default_path)
         self.data = deepcopy(DEFAULT_STATE)
         saved = self._load()
-        if saved:
-            self._deep_merge(self.data, saved)
-        if initial:
-            self._deep_merge(self.data, deepcopy(initial))
+        if saved: self._deep_merge(self.data, saved)
+        if initial: self._deep_merge(self.data, deepcopy(initial))
 
     def _load(self) -> Dict:
         if not self.path.exists(): return {}
@@ -73,8 +74,7 @@ class GameState:
         node = self.data
         for key in keys[:-1]:
             child = node.get(key)
-            if not isinstance(child, dict):
-                child = {}; node[key] = child
+            if not isinstance(child, dict): child = {}; node[key] = child
             node = child
         node[keys[-1]] = value
         if save: self.save()
