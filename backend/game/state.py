@@ -61,10 +61,51 @@ class GameState:
     def apply_changes(self, changes: List[Dict]) -> None:
         if not isinstance(changes, list): changes = []
         for change in changes:
-            if not isinstance(change, dict): continue
+            if not isinstance(change, dict):
+                continue
+
+            change_type = str(change.get("type") or "").strip().lower()
+            if change_type == "reset_combat_state":
+                self.data["combat"] = {"active": False}
+                player = self.data.setdefault("player", {})
+                player["combat_position"] = {"x": 0, "y": 0}
+                max_hp = int(player.get("max_hp", 0) or 0)
+                if max_hp > 0:
+                    player["hp"] = max_hp
+                max_mana = int(player.get("max_mana", 0) or 0)
+                if max_mana > 0:
+                    player["mana"] = max_mana
+                player["temporary_hp"] = 0
+                player["conditions"] = []
+                continue
+
+            if change_type == "restore_hp":
+                target = str(change.get("target") or "").strip()
+                player = self.data.setdefault("player", {})
+                player_name = str(player.get("name") or "Traveler")
+                if not target or target == player_name:
+                    requested = change.get("hp")
+                    if requested is None:
+                        requested = player.get("max_hp", player.get("hp", 0))
+                    player["hp"] = max(0, int(requested or 0))
+                continue
+
+            if change_type == "restore_mana":
+                target = str(change.get("target") or "").strip()
+                player = self.data.setdefault("player", {})
+                player_name = str(player.get("name") or "Traveler")
+                if not target or target == player_name:
+                    requested = change.get("mana")
+                    if requested is None:
+                        requested = player.get("max_mana", player.get("mana", 0))
+                    player["mana"] = max(0, int(requested or 0))
+                continue
+
             path = change.get("path")
-            if not isinstance(path, str) or not path.strip() or "value" not in change: continue
+            if not isinstance(path, str) or not path.strip() or "value" not in change:
+                continue
             self.set_path(path, change["value"], save=False)
+
         self.data["turn"] = int(self.data.get("turn", 0)) + 1
         self.save()
 
