@@ -35,7 +35,7 @@ def _format_damage_breakdown(event) -> str:
 
 
 def _print_movement_hud(combat) -> None:
-    """Show the player's current tactical movement state during combat."""
+    """Show the player's current tactical turn state during combat."""
     if not isinstance(combat, dict) or not combat.get("active"):
         return
 
@@ -61,12 +61,14 @@ def _print_movement_hud(combat) -> None:
     turn_index = int(combat.get("turn_index", 0) or 0)
     current_turn = order[turn_index] if order and 0 <= turn_index < len(order) else "Unknown"
     round_number = int(combat.get("round", 1) or 1)
+    action_status = "USED" if player.get("primary_action_used") else "READY"
+    defending = " | Defending: +2 AC" if player.get("defending") else ""
 
     print("\n🏃 MOVEMENT HUD")
     print(
         f"Round {round_number} | Position: ({x}, {y}) | "
         f"Movement: {movement_remaining}/{movement_total} remaining "
-        f"({movement_used} used) | Turn: {current_turn}"
+        f"({movement_used} used) | Action: {action_status} | Turn: {current_turn}{defending}"
     )
 
 
@@ -100,6 +102,8 @@ def _print_combat_results(results, combat=None) -> None:
                 )
                 if event.get("target_defeated"):
                     print(f"{target} is defeated.")
+        elif event_type in {"player_defend", "enemy_defend"}:
+            print(f"\n🛡️ {event.get('actor', 'Combatant')} DEFENDS — +2 AC until next turn")
         elif event_type == "player_end_turn":
             print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
         elif event_type == "enemy_pass":
