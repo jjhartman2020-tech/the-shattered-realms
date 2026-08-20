@@ -100,7 +100,9 @@ The first playable prototype uses a **square grid**.
 - Every combatant has an `(x, y)` square position.
 - Distance is currently measured by orthogonal square steps: horizontal plus vertical distance.
 - A combatant cannot end movement on a square occupied by another active combatant.
-- A combatant may move no farther in one movement action than their current **Movement** value.
+- Each combatant has one **Movement budget per turn** equal to their current Movement value.
+- Multiple movement actions in the same turn all spend from that same budget; splitting movement never lets a combatant exceed their total Movement.
+- When a combatant's next turn begins, their spent movement resets to 0.
 - Movement continues to use the Speed-based formula defined in Stats.md.
 - Standard melee attacks have **range 1 square** unless a weapon, ability, size, or effect states otherwise.
 - Ranged weapons and abilities may define larger attack ranges.
