@@ -184,9 +184,18 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     automatic_hit = natural == 20
     hit = False if automatic_miss else (True if automatic_hit else total >= armor_class)
 
+    # Criticals have two routes by design: a natural 20 is always critical,
+    # while other successful hits can crit through the attacker's Dexterity-
+    # based critical chance.
     crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
     crit_roll = int(roll("1d100")["total"]) if hit and not automatic_hit else None
     critical = bool(automatic_hit or (hit and crit_roll is not None and crit_roll <= crit_chance))
+
+    # A hit that beats Armor Class by a wide margin lands more cleanly.
+    # Every complete 3 points above AC adds +1 flat damage. This bonus is
+    # applied once even on a critical hit.
+    accuracy_margin = max(0, total - armor_class) if hit else 0
+    accuracy_margin_damage_bonus = accuracy_margin // 3
 
     applied_damage_bonus = int(default_damage_bonus if damage_bonus is None else damage_bonus)
     damage, damage_rolls, raw_damage, resistance_percent = 0, [], 0, 0
@@ -194,7 +203,7 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
         expression = damage_expression or str(attacker.get("damage", "1d4"))
         first = roll(expression)
         damage_rolls.append(first)
-        raw_damage = int(first["total"]) + applied_damage_bonus
+        raw_damage = int(first["total"]) + applied_damage_bonus + accuracy_margin_damage_bonus
         if critical:
             extra = roll(expression)
             damage_rolls.append(extra)
@@ -211,6 +220,8 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
                "attack_bonus": total_attack_bonus, "attack_total": total,
                "armor_class": armor_class, "hit": hit, "critical": critical,
                "critical_roll": crit_roll, "critical_chance_percent": crit_chance,
+               "accuracy_margin": accuracy_margin,
+               "accuracy_margin_damage_bonus": accuracy_margin_damage_bonus,
                "damage_bonus": applied_damage_bonus, "raw_damage": raw_damage,
                "physical_resistance_percent": resistance_percent,
                "damage": damage, "damage_rolls": damage_rolls,
