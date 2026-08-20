@@ -1,11 +1,10 @@
-"""Canonical Shattered Realms 0-60 attribute framework.
+"""Canonical Shattered Realms 0-30 attribute framework.
 
 Sources of truth:
 - docs/Stats.md
 - docs/progression/Leveling.md
 
-This module owns conversion from raw attributes into deterministic mechanical
-channels. The AI may choose context, but it may not invent these values.
+The AI may choose context, but the engine owns mechanical values.
 """
 
 from copy import deepcopy
@@ -18,14 +17,14 @@ ATTRIBUTE_NAMES = (
 )
 
 STARTING_ATTRIBUTE_POINTS = 60
-ATTRIBUTE_POINTS_PER_LEVEL = 5
+ATTRIBUTE_POINTS_PER_LEVEL = 3
 ABILITY_POINTS_PER_LEVEL = 1
 MAX_HEALTH_GAIN_PER_LEVEL = 5
-NATURAL_ATTRIBUTE_CAP = 60
-MAX_LEVEL = 97
+NATURAL_ATTRIBUTE_CAP = 30
+MAX_LEVEL = 71
 BASE_ARMOR_CLASS = 10
 BASE_MOVEMENT = 6
-BASE_CRITICAL_CHANCE = 0.05
+BASE_CRITICAL_CHANCE = 5  # percentage points
 
 DEFAULT_ATTRIBUTES = {name: 0 for name in ATTRIBUTE_NAMES}
 
@@ -77,53 +76,59 @@ def validate_allocation(attributes: Dict | None = None, level: int = 1) -> Dict:
     normalized = normalize_attributes(attributes)
     available = earned_attribute_points(level)
     spent = sum(normalized.values())
-    return {"valid": spent <= available, "attributes": normalized,
-            "points_spent": spent, "points_available": available,
-            "points_unspent": available - spent, "natural_cap": NATURAL_ATTRIBUTE_CAP}
+    return {
+        "valid": spent <= available,
+        "attributes": normalized,
+        "points_spent": spent,
+        "points_available": available,
+        "points_unspent": available - spent,
+        "natural_cap": NATURAL_ATTRIBUTE_CAP,
+    }
 
 
-def attribute_check_bonus(score: int) -> float:
-    return max(0, int(score)) / 6.0
+def attribute_check_bonus(score: int) -> int:
+    """Every complete 3 attribute points grant +1. No decimals."""
+    return max(0, int(score)) // 3
 
 
-def attack_accuracy_bonus(score: int) -> float:
-    return max(0, int(score)) / 12.0
+def attack_accuracy_bonus(score: int) -> int:
+    return attribute_check_bonus(score)
 
 
-def physical_damage_multiplier(strength: int) -> float:
-    return 1.0 + max(0, int(strength)) / 100.0
+def strength_damage_bonus(strength: int) -> int:
+    return max(0, int(strength)) // 6
 
 
-def magic_power_multiplier(intelligence: int) -> float:
-    return 1.0 + max(0, int(intelligence)) / 100.0
+def critical_chance(dexterity: int) -> int:
+    """Return whole percentage points."""
+    return BASE_CRITICAL_CHANCE + attribute_check_bonus(dexterity)
 
 
-def healing_multiplier(wisdom: int) -> float:
-    return 1.0 + max(0, int(wisdom)) / 100.0
+def physical_resistance(constitution: int) -> int:
+    """Return whole percentage points."""
+    return attribute_check_bonus(constitution)
 
 
-def critical_chance(dexterity: int) -> float:
-    return BASE_CRITICAL_CHANCE + max(0, int(dexterity)) * 0.001
+def status_resistance(constitution: int) -> int:
+    """Return whole percentage points."""
+    return attribute_check_bonus(constitution) * 2
 
 
-def physical_resistance(constitution: int) -> float:
-    return min(1.0, max(0, int(constitution)) * 0.0025)
+def defense_bonus(dexterity: int, constitution: int, speed: int) -> int:
+    return max(0, int(dexterity)) // 9 + max(0, int(constitution)) // 15 + max(0, int(speed)) // 15
 
 
-def status_resistance(constitution: int) -> float:
-    return min(1.0, max(0, int(constitution)) * 0.005)
-
-
-def defense_bonus(dexterity: int, constitution: int, speed: int) -> float:
-    return max(0, int(dexterity)) / 15.0 + max(0, int(constitution)) / 20.0 + max(0, int(speed)) / 30.0
-
-
-def initiative_bonus(speed: int, dexterity: int) -> float:
-    return max(0, int(speed)) / 6.0 + max(0, int(dexterity)) / 12.0
+def initiative_bonus(speed: int, dexterity: int) -> int:
+    return max(0, int(speed)) // 3 + max(0, int(dexterity)) // 6
 
 
 def movement_spaces(speed: int) -> int:
-    return BASE_MOVEMENT + floor(max(0, int(speed)) / 10)
+    return BASE_MOVEMENT + max(0, int(speed)) // 6
+
+
+def trading_influence(charisma: int) -> int:
+    """Return whole percentage points."""
+    return attribute_check_bonus(charisma)
 
 
 def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> Dict:
@@ -134,9 +139,12 @@ def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> 
         "level_health_bonus": level_health_bonus(level),
         "max_health_base": max(1, a["health"] + level_health_bonus(level)),
         "max_mana_base": a["mana"],
-        "strength_rating": a["strength"], "dexterity_rating": a["dexterity"],
-        "constitution_rating": a["constitution"], "intelligence_rating": a["intelligence"],
-        "wisdom_rating": a["wisdom"], "charisma_rating": a["charisma"],
+        "strength_rating": a["strength"],
+        "dexterity_rating": a["dexterity"],
+        "constitution_rating": a["constitution"],
+        "intelligence_rating": a["intelligence"],
+        "wisdom_rating": a["wisdom"],
+        "charisma_rating": a["charisma"],
         "speed_rating": a["speed"],
         "strength_check_bonus": attribute_check_bonus(a["strength"]),
         "dexterity_check_bonus": attribute_check_bonus(a["dexterity"]),
@@ -147,16 +155,14 @@ def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> 
         "speed_check_bonus": attribute_check_bonus(a["speed"]),
         "strength_attack_accuracy": attack_accuracy_bonus(a["strength"]),
         "dexterity_attack_accuracy": attack_accuracy_bonus(a["dexterity"]),
-        "physical_damage_multiplier": physical_damage_multiplier(a["strength"]),
-        "magic_power_multiplier": magic_power_multiplier(a["intelligence"]),
-        "healing_multiplier": healing_multiplier(a["wisdom"]),
-        "critical_chance": critical_chance(a["dexterity"]),
-        "physical_resistance": physical_resistance(a["constitution"]),
-        "status_resistance": status_resistance(a["constitution"]),
+        "strength_damage_bonus": strength_damage_bonus(a["strength"]),
+        "critical_chance_percent": critical_chance(a["dexterity"]),
+        "physical_resistance_percent": physical_resistance(a["constitution"]),
+        "status_resistance_percent": status_resistance(a["constitution"]),
         "defense_bonus": defense_bonus(a["dexterity"], a["constitution"], a["speed"]),
         "initiative_bonus": initiative_bonus(a["speed"], a["dexterity"]),
         "movement": movement_spaces(a["speed"]),
-        "trading_influence": a["charisma"] * 0.0025,
+        "trading_influence_percent": trading_influence(a["charisma"]),
     }
 
 
@@ -167,18 +173,23 @@ def build_combatant(name: str, team: str, attributes: Dict | None = None, *,
     level = max(1, min(MAX_LEVEL, int(level)))
     sheet = character_sheet_channels(a, level)
     actor = {
-        "name": name, "team": team, "level": level, "attributes": a,
+        "name": name,
+        "team": team,
+        "level": level,
+        "attributes": a,
         "attribute_channels": sheet,
         "hp": sheet["max_health_base"] if hp is None else int(hp),
         "max_hp": sheet["max_health_base"],
-        "mana": sheet["max_mana_base"], "max_mana": sheet["max_mana_base"],
-        "attack_bonus": 0, "damage_bonus": 0,
+        "mana": sheet["max_mana_base"],
+        "max_mana": sheet["max_mana_base"],
+        "attack_bonus": 0,
+        "damage_bonus": sheet["strength_damage_bonus"],
         "armor_class": BASE_ARMOR_CLASS + sheet["defense_bonus"],
         "initiative_bonus": sheet["initiative_bonus"],
         "movement": sheet["movement"],
-        "critical_chance": sheet["critical_chance"],
-        "physical_resistance": sheet["physical_resistance"],
-        "status_resistance": sheet["status_resistance"],
+        "critical_chance_percent": sheet["critical_chance_percent"],
+        "physical_resistance_percent": sheet["physical_resistance_percent"],
+        "status_resistance_percent": sheet["status_resistance_percent"],
     }
     if isinstance(overrides, dict):
         actor.update(overrides)
