@@ -7,10 +7,10 @@ from .dice import roll
 from .attributes import character_sheet_channels, normalize_attributes
 
 
-def roll_initiative(name: str, attributes: Dict | None = None, bonus: float = 0) -> Dict:
+def roll_initiative(name: str, attributes: Dict | None = None, bonus: int = 0) -> Dict:
     base = roll("1d20")
     channels = character_sheet_channels(attributes)
-    modifier = float(channels["initiative_bonus"]) + float(bonus)
+    modifier = int(channels["initiative_bonus"]) + int(bonus)
     return {"name": name, "roll": int(base["total"]), "modifier": modifier,
             "total": int(base["total"]) + modifier}
 
@@ -30,11 +30,11 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor.setdefault("max_hp", actor["hp"])
         actor.setdefault("armor_class", 10 + channels["defense_bonus"])
         actor.setdefault("attack_bonus", 0)
-        actor.setdefault("damage_bonus", 0)
+        actor.setdefault("damage_bonus", channels["strength_damage_bonus"])
         actor.setdefault("damage", "1d4")
         actor.setdefault("movement", channels["movement"])
-        actor.setdefault("critical_chance", channels["critical_chance"])
-        actor.setdefault("physical_resistance", channels["physical_resistance"])
+        actor.setdefault("critical_chance_percent", channels["critical_chance_percent"])
+        actor.setdefault("physical_resistance_percent", channels["physical_resistance_percent"])
         actor["defeated"] = int(actor["hp"]) <= 0
         prepared.append(actor)
         initiative.append(roll_initiative(actor["name"], attrs, actor.get("initiative_bonus", 0)))
@@ -58,8 +58,8 @@ def current_actor(combat: Dict) -> Dict | None:
 
 
 def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
-                   attack_bonus: float | None = None, damage_expression: str | None = None,
-                   damage_bonus: float | None = None, attack_attribute: str = "strength",
+                   attack_bonus: int | None = None, damage_expression: str | None = None,
+                   damage_bonus: int | None = None, attack_attribute: str = "strength",
                    enforce_turn: bool = False) -> Dict:
     attacker, target = _find_actor(combat, attacker_name), _find_actor(combat, target_name)
     if attacker.get("defeated"):
@@ -73,43 +73,39 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
 
     attrs = normalize_attributes(attacker.get("attributes"))
     channels = character_sheet_channels(attrs, attacker.get("level", 1))
-    if attack_attribute == "dexterity":
-        stat_accuracy = channels["dexterity_attack_accuracy"]
-    else:
-        stat_accuracy = channels["strength_attack_accuracy"]
-    bonus = float(attacker.get("attack_bonus", 0) if attack_bonus is None else attack_bonus) + stat_accuracy
+    stat_accuracy = channels["dexterity_attack_accuracy"] if attack_attribute == "dexterity" else channels["strength_attack_accuracy"]
+    bonus = int(attacker.get("attack_bonus", 0) if attack_bonus is None else attack_bonus) + int(stat_accuracy)
 
     attack = roll("1d20")
     natural = int(attack["rolls"][0])
     total = int(attack["total"]) + bonus
-    armor_class = float(target.get("armor_class", 10))
+    armor_class = int(target.get("armor_class", 10))
     automatic_miss = natural == 1
-    crit_chance = float(attacker.get("critical_chance", channels["critical_chance"]))
+    crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
     critical = natural == 20
     hit = False if automatic_miss else (True if critical else total >= armor_class)
     damage, damage_rolls = 0, []
 
-    applied_damage_bonus = float(attacker.get("damage_bonus", 0) if damage_bonus is None else damage_bonus)
+    default_damage_bonus = channels["strength_damage_bonus"] if attack_attribute == "strength" else 0
+    applied_damage_bonus = int(attacker.get("damage_bonus", default_damage_bonus) if damage_bonus is None else damage_bonus)
     if hit:
         expression = damage_expression or str(attacker.get("damage", "1d4"))
         first = roll(expression)
         damage_rolls.append(first)
-        raw_damage = float(first["total"]) + applied_damage_bonus
-        if attack_attribute == "strength":
-            raw_damage *= channels["physical_damage_multiplier"]
+        raw_damage = int(first["total"]) + applied_damage_bonus
         if critical:
             second = roll(expression)
             damage_rolls.append(second)
-            raw_damage += float(second["total"])
-        resistance = float(target.get("physical_resistance", 0)) if attack_attribute in {"strength", "dexterity"} else 0
-        damage = max(0, round(raw_damage * (1.0 - resistance)))
+            raw_damage += int(second["total"])
+        resistance_percent = int(target.get("physical_resistance_percent", 0)) if attack_attribute in {"strength", "dexterity"} else 0
+        damage = max(0, round(raw_damage * (100 - resistance_percent) / 100))
         target["hp"] = max(0, int(target.get("hp", 0)) - damage)
         target["defeated"] = target["hp"] <= 0
 
     outcome = {"attacker": attacker_name, "target": target_name, "d20": natural,
                "attack_attribute": attack_attribute, "attack_bonus": bonus,
                "attack_total": total, "armor_class": armor_class,
-               "hit": hit, "critical": critical, "critical_chance": crit_chance,
+               "hit": hit, "critical": critical, "critical_chance_percent": crit_chance,
                "damage": damage, "damage_bonus": applied_damage_bonus,
                "damage_rolls": damage_rolls, "target_hp": int(target.get("hp", 0)),
                "target_max_hp": int(target.get("max_hp", target.get("hp", 0))),
