@@ -1,19 +1,41 @@
-"""Character-sheet statistics for The Shattered Realms.
+"""Canonical Shattered Realms attribute framework.
 
-The engine owns mechanical truth. AI narration can describe outcomes, but these
-functions calculate attributes, modifiers, skills, saves and derived values.
+Sources of truth:
+- docs/Stats.md
+- docs/progression/Leveling.md
+
+The docs define nine attributes, 60 starting Attribute Points, +5 Attribute
+Points per level, a natural cap of 60, +5 Maximum Health per level, +1 Ability
+Point per level, and a natural maximum level of 97. They do not yet define exact
+0-60-to-combat scaling formulas, so this module enforces progression rules
+without importing D&D ability-score math.
 """
+
 from copy import deepcopy
 from typing import Dict
 
-# Shattered Realms keeps the six classic tabletop abilities and adds Speed as a
-# separate tactical attribute because grid movement is a core game mechanic.
-CORE_ATTRIBUTES = (
-    "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma", "speed"
+ATTRIBUTE_NAMES = (
+    "health",
+    "mana",
+    "strength",
+    "dexterity",
+    "constitution",
+    "intelligence",
+    "wisdom",
+    "charisma",
+    "speed",
 )
-DEFAULT_ATTRIBUTES = {name: 10 for name in CORE_ATTRIBUTES}
 
-SKILL_ABILITY = {
+STARTING_ATTRIBUTE_POINTS = 60
+ATTRIBUTE_POINTS_PER_LEVEL = 5
+ABILITY_POINTS_PER_LEVEL = 1
+MAX_HEALTH_GAIN_PER_LEVEL = 5
+NATURAL_ATTRIBUTE_CAP = 60
+MAX_LEVEL = 97
+
+DEFAULT_ATTRIBUTES = {name: 0 for name in ATTRIBUTE_NAMES}
+
+SKILL_ATTRIBUTE = {
     "acrobatics": "dexterity",
     "animal_handling": "wisdom",
     "arcana": "intelligence",
@@ -35,112 +57,95 @@ SKILL_ABILITY = {
 }
 
 
-def modifier(score: int) -> int:
-    return (int(score) - 10) // 2
-
-
-def proficiency_bonus(level: int) -> int:
-    level = max(1, int(level))
-    return 2 + (level - 1) // 4
-
-
 def normalize_attributes(attributes: Dict | None = None) -> Dict[str, int]:
     result = deepcopy(DEFAULT_ATTRIBUTES)
-    if isinstance(attributes, dict):
-        aliases = {"agility": "dexterity", "durability": "constitution"}
-        for raw_name, value in attributes.items():
-            name = aliases.get(raw_name, raw_name)
-            if name in result:
-                result[name] = max(1, int(value))
+    if not isinstance(attributes, dict):
+        return result
+    aliases = {"agility": "dexterity", "durability": "constitution"}
+    for raw_name, raw_value in attributes.items():
+        name = aliases.get(raw_name, raw_name)
+        if name in result:
+            result[name] = max(0, min(NATURAL_ATTRIBUTE_CAP, int(raw_value)))
     return result
 
 
-def ability_modifiers(attributes: Dict | None = None) -> Dict[str, int]:
-    a = normalize_attributes(attributes)
-    return {name: modifier(score) for name, score in a.items()}
+def earned_attribute_points(level: int) -> int:
+    level = max(1, min(MAX_LEVEL, int(level)))
+    return STARTING_ATTRIBUTE_POINTS + (level - 1) * ATTRIBUTE_POINTS_PER_LEVEL
 
 
-def saving_throws(attributes: Dict | None = None, level: int = 1,
-                  proficient: list[str] | None = None) -> Dict[str, int]:
-    mods = ability_modifiers(attributes)
-    prof = proficiency_bonus(level)
-    proficient = set(proficient or [])
-    return {name: mods[name] + (prof if name in proficient else 0)
-            for name in CORE_ATTRIBUTES if name != "speed"}
+def earned_ability_points(level: int) -> int:
+    level = max(1, min(MAX_LEVEL, int(level)))
+    return (level - 1) * ABILITY_POINTS_PER_LEVEL
 
 
-def skill_bonuses(attributes: Dict | None = None, level: int = 1,
-                  proficient: list[str] | None = None,
-                  expertise: list[str] | None = None) -> Dict[str, int]:
-    mods = ability_modifiers(attributes)
-    prof = proficiency_bonus(level)
-    proficient, expertise = set(proficient or []), set(expertise or [])
-    result = {}
-    for skill, ability in SKILL_ABILITY.items():
-        bonus = mods[ability]
-        if skill in expertise:
-            bonus += prof * 2
-        elif skill in proficient:
-            bonus += prof
-        result[skill] = bonus
-    return result
+def level_health_bonus(level: int) -> int:
+    level = max(1, min(MAX_LEVEL, int(level)))
+    return (level - 1) * MAX_HEALTH_GAIN_PER_LEVEL
 
 
-def derived_stats(attributes: Dict | None = None, level: int = 1,
-                  skill_proficiencies: list[str] | None = None,
-                  expertise: list[str] | None = None,
-                  save_proficiencies: list[str] | None = None) -> Dict:
-    a = normalize_attributes(attributes)
-    m = ability_modifiers(a)
-    level = max(1, int(level))
-    prof = proficiency_bonus(level)
-    skills = skill_bonuses(a, level, skill_proficiencies, expertise)
-    saves = saving_throws(a, level, save_proficiencies)
-    max_hp = max(1, 10 + (level - 1) * 4 + m["constitution"] * 2)
+def points_spent(attributes: Dict | None = None) -> int:
+    return sum(normalize_attributes(attributes).values())
 
+
+def validate_allocation(attributes: Dict | None = None, level: int = 1) -> Dict:
+    normalized = normalize_attributes(attributes)
+    available = earned_attribute_points(level)
+    spent = sum(normalized.values())
     return {
-        "proficiency_bonus": prof,
-        "ability_modifiers": m,
-        "saving_throws": saves,
-        "skills": skills,
-        "armor_class": max(1, 10 + m["dexterity"]),
-        "initiative_bonus": m["dexterity"] + m["speed"],
-        "movement": max(1, 6 + m["speed"]),
-        "max_hp": max_hp,
-        "hit_dice": f"{level}d8",
-        "max_mana": max(0, m["intelligence"] + m["wisdom"] + (level - 1) * 2),
-        "passive_perception": 10 + skills["perception"],
-        "passive_insight": 10 + skills["insight"],
-        "passive_investigation": 10 + skills["investigation"],
-        "melee_attack_bonus": m["strength"] + prof,
-        "finesse_attack_bonus": m["dexterity"] + prof,
-        "ranged_attack_bonus": m["dexterity"] + prof,
-        "melee_damage_bonus": m["strength"],
-        "finesse_damage_bonus": m["dexterity"],
-        "physical_resistance": m["constitution"],
-        "mental_resistance": m["wisdom"],
-        "magic_power": m["intelligence"],
-        "spell_attack_bonus": prof + max(m["intelligence"], m["wisdom"], m["charisma"]),
-        "spell_save_dc": 8 + prof + max(m["intelligence"], m["wisdom"], m["charisma"]),
+        "valid": spent <= available,
+        "attributes": normalized,
+        "points_spent": spent,
+        "points_available": available,
+        "points_unspent": available - spent,
+        "natural_cap": NATURAL_ATTRIBUTE_CAP,
     }
 
 
-def build_combatant(name: str, team: str, attributes: Dict | None = None, *, level: int = 1,
-                    hp: int | None = None, damage: str = "1d6", attack_type: str = "melee",
-                    overrides: Dict | None = None) -> Dict:
+def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> Dict:
+    """Expose raw canonical ratings without inventing undocumented scaling."""
     a = normalize_attributes(attributes)
-    d = derived_stats(a, level)
-    attack_key = {"melee": "melee_attack_bonus", "finesse": "finesse_attack_bonus",
-                  "ranged": "ranged_attack_bonus"}.get(attack_type, "melee_attack_bonus")
-    damage_key = "finesse_damage_bonus" if attack_type == "finesse" else (
-        "melee_damage_bonus" if attack_type == "melee" else None)
+    return {
+        "attributes": a,
+        "level_health_bonus": level_health_bonus(level),
+        "max_health_base": a["health"] + level_health_bonus(level),
+        "max_mana_base": a["mana"],
+        "strength_rating": a["strength"],
+        "dexterity_rating": a["dexterity"],
+        "constitution_rating": a["constitution"],
+        "intelligence_rating": a["intelligence"],
+        "wisdom_rating": a["wisdom"],
+        "charisma_rating": a["charisma"],
+        "speed_rating": a["speed"],
+    }
+
+
+def build_combatant(name: str, team: str, attributes: Dict | None = None, *,
+                    level: int = 1, hp: int | None = None,
+                    overrides: Dict | None = None) -> Dict:
+    """Build a combat actor while preserving canonical raw attribute values.
+
+    Exact attack/defense/movement formulas remain explicit overrides until the
+    design docs define how 0-60 attributes convert into those numbers.
+    """
+    a = normalize_attributes(attributes)
+    level = max(1, min(MAX_LEVEL, int(level)))
+    sheet = character_sheet_channels(a, level)
     actor = {
-        "name": name, "team": team, "level": int(level), "attributes": a, "derived": d,
-        "hp": d["max_hp"] if hp is None else int(hp), "max_hp": d["max_hp"],
-        "armor_class": d["armor_class"], "dexterity": a["dexterity"],
-        "initiative_bonus": d["initiative_bonus"], "movement": d["movement"],
-        "attack_bonus": d[attack_key], "damage_bonus": d[damage_key] if damage_key else 0,
-        "damage": damage, "attack_type": attack_type,
+        "name": name,
+        "team": team,
+        "level": level,
+        "attributes": a,
+        "attribute_channels": sheet,
+        "hp": sheet["max_health_base"] if hp is None else int(hp),
+        "max_hp": sheet["max_health_base"],
+        "mana": sheet["max_mana_base"],
+        "max_mana": sheet["max_mana_base"],
+        "attack_bonus": 0,
+        "damage_bonus": 0,
+        "armor_class": 10,
+        "initiative_bonus": 0,
+        "movement": 6,
     }
     if isinstance(overrides, dict):
         actor.update(overrides)
