@@ -34,6 +34,15 @@ def _format_damage_breakdown(event) -> str:
     return " | ".join(parts)
 
 
+def _position_xy(actor) -> tuple[int, int]:
+    position = actor.get("position") or {"x": 0, "y": 0}
+    if isinstance(position, (list, tuple)) and len(position) >= 2:
+        return int(position[0]), int(position[1])
+    if isinstance(position, dict):
+        return int(position.get("x", 0)), int(position.get("y", 0))
+    return 0, 0
+
+
 def _print_movement_hud(combat) -> None:
     """Show the player's current tactical turn state during combat."""
     if not isinstance(combat, dict) or not combat.get("active"):
@@ -50,12 +59,7 @@ def _print_movement_hud(combat) -> None:
     movement_total = int(player.get("movement", 0) or 0)
     movement_used = int(player.get("movement_used", 0) or 0)
     movement_remaining = max(0, movement_total - movement_used)
-    position = player.get("position") or {"x": 0, "y": 0}
-    if isinstance(position, (list, tuple)) and len(position) >= 2:
-        x, y = int(position[0]), int(position[1])
-    else:
-        x = int(position.get("x", 0)) if isinstance(position, dict) else 0
-        y = int(position.get("y", 0)) if isinstance(position, dict) else 0
+    x, y = _position_xy(player)
 
     order = combat.get("order") or []
     turn_index = int(combat.get("turn_index", 0) or 0)
@@ -71,6 +75,30 @@ def _print_movement_hud(combat) -> None:
         f"Movement: {movement_remaining}/{movement_total} remaining "
         f"({movement_used} used) | Action: {action_status} | Turn: {current_turn}{defending}"
     )
+
+
+def _print_target_hud(combat) -> None:
+    """Show the currently known enemy combatants as distinct selectable targets."""
+    if not isinstance(combat, dict) or not combat.get("active"):
+        return
+    enemies = [
+        actor for actor in (combat.get("combatants") or [])
+        if isinstance(actor, dict) and actor.get("team") == "enemy"
+    ]
+    if not enemies:
+        return
+
+    entries = []
+    for enemy in enemies:
+        name = str(enemy.get("name") or "Enemy")
+        hp = int(enemy.get("hp", 0) or 0)
+        max_hp = int(enemy.get("max_hp", hp) or hp)
+        x, y = _position_xy(enemy)
+        status = "DEFEATED" if enemy.get("defeated") else f"{hp}/{max_hp} HP"
+        entries.append(f"{name}: {status} @ ({x}, {y})")
+
+    print("🎯 TARGETS")
+    print(" | ".join(entries))
 
 
 def _print_combat_results(results, combat=None) -> None:
@@ -115,6 +143,7 @@ def _print_combat_results(results, combat=None) -> None:
             print(f"\n⚠️ COMBAT ACTION INVALID: {event.get('reason', 'Unknown reason')}")
 
     _print_movement_hud(combat)
+    _print_target_hud(combat)
 
 
 def main() -> None:
