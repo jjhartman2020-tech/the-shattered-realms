@@ -58,9 +58,11 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor.setdefault("attack_bonus", 0)
         actor.setdefault("damage", "1d4")
         actor.setdefault("movement", channels["movement"])
+        actor.setdefault("defend_action_ac_bonus", channels["defend_action_ac_bonus"])
         actor["movement_used"] = 0
         actor["primary_action_used"] = False
         actor["defending"] = False
+        actor["active_defense_ac_bonus"] = 0
         actor.setdefault("attack_range", 1)
         actor.setdefault("critical_chance_percent", channels["critical_chance_percent"])
         actor.setdefault("physical_resistance_percent", channels["physical_resistance_percent"])
@@ -153,17 +155,23 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
 
 
 def defend_actor(combat: Dict, actor_name: str, *, enforce_turn: bool = False) -> Dict:
-    """Spend the primary action to gain +2 AC until this actor's next turn begins."""
+    """Spend the primary action to gain Defense-scaled AC until next turn."""
     actor = _find_actor(combat, actor_name)
     if enforce_turn:
         _require_turn(combat, actor, actor_name)
     _require_primary_action(actor, actor_name)
+    attrs = normalize_attributes(actor.get("attributes"))
+    channels = character_sheet_channels(attrs, actor.get("level", 1))
+    defense_score = int(attrs.get("defense", 0))
+    defense_ac_bonus = int(channels.get("defend_action_ac_bonus", 0))
     actor["primary_action_used"] = True
     actor["defending"] = True
+    actor["active_defense_ac_bonus"] = defense_ac_bonus
     result = {
         "actor": actor_name,
         "defending": True,
-        "defense_ac_bonus": 2,
+        "defense_score": defense_score,
+        "defense_ac_bonus": defense_ac_bonus,
         "primary_action_used": True,
     }
     combat.setdefault("log", []).append({"type": "defend", **result})
@@ -206,7 +214,7 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     natural = int(attack["rolls"][0])
     total = int(attack["total"]) + total_attack_bonus
     base_armor_class = int(target.get("armor_class", 10))
-    defense_ac_bonus = 2 if target.get("defending") else 0
+    defense_ac_bonus = int(target.get("active_defense_ac_bonus", 0)) if target.get("defending") else 0
     armor_class = base_armor_class + defense_ac_bonus
     automatic_miss = natural == 1
     automatic_hit = natural == 20
@@ -278,6 +286,7 @@ def end_turn(combat: Dict) -> Dict:
             actor["movement_used"] = 0
             actor["primary_action_used"] = False
             actor["defending"] = False
+            actor["active_defense_ac_bonus"] = 0
             break
         if index == starting_index:
             combat["active"] = False
