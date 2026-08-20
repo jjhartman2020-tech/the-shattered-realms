@@ -26,6 +26,24 @@ SKILL_ALIASES = {
     "performance": "performance", "religion": "religion", "history": "history",
 }
 
+ATTRIBUTE_ALIASES = {
+    "health": "health", "mana": "mana", "strength": "strength",
+    "dexterity": "dexterity", "agility": "dexterity",
+    "constitution": "constitution", "durability": "constitution",
+    "intelligence": "intelligence", "wisdom": "wisdom",
+    "charisma": "charisma", "speed": "speed",
+}
+
+ATTRIBUTE_REASON_HINTS = {
+    "strength": ("force", "lift", "break", "shove", "grapple", "overpower", "push", "pull"),
+    "dexterity": ("dodge", "balance", "jump", "reflex", "aim", "precise", "finesse"),
+    "constitution": ("endure", "resist poison", "hold breath", "tough", "fatigue", "pain"),
+    "intelligence": ("recall", "decode", "analyze", "research", "arcane", "solve"),
+    "wisdom": ("notice", "sense", "track", "intuition", "heal", "survive"),
+    "charisma": ("convince", "persuade", "deceive", "intimidate", "perform", "negotiate"),
+    "speed": ("sprint", "race", "outrun", "react quickly", "catch up"),
+}
+
 
 def _skill_for_check(request: Dict, reason: str) -> str | None:
     requested = str(request.get("skill") or "").strip().lower().replace("-", " ")
@@ -35,6 +53,19 @@ def _skill_for_check(request: Dict, reason: str) -> str | None:
     for phrase, skill in SKILL_ALIASES.items():
         if phrase.replace("_", " ") in text:
             return skill
+    return None
+
+
+def _attribute_for_check(request: Dict, reason: str, skill: str | None) -> str | None:
+    requested = str(request.get("attribute") or "").strip().lower().replace("-", " ")
+    if requested in ATTRIBUTE_ALIASES:
+        return ATTRIBUTE_ALIASES[requested]
+    if skill and skill in SKILL_ATTRIBUTE:
+        return SKILL_ATTRIBUTE[skill]
+    text = reason.lower()
+    for attribute, hints in ATTRIBUTE_REASON_HINTS.items():
+        if any(hint in text for hint in hints):
+            return attribute
     return None
 
 
@@ -73,15 +104,18 @@ class GameMaster:
             skill = _skill_for_check(request, reason)
             player = self.state.snapshot().get("player", {})
             skills = player.get("skills", {}) if isinstance(player, dict) else {}
-            attributes = normalize_attributes(player.get("attributes", {}) if isinstance(player, dict) else {})
+            raw_stats = player.get("stats") or player.get("attributes") or {} if isinstance(player, dict) else {}
+            attributes = normalize_attributes(raw_stats)
             skill_bonus = float(skills.get(skill, 0)) if skill else 0.0
-            attribute = SKILL_ATTRIBUTE.get(skill) if skill else None
-            attribute_bonus = attribute_check_bonus(attributes.get(attribute, 0)) if attribute else 0.0
+            attribute = _attribute_for_check(request, reason, skill)
+            attribute_value = int(attributes.get(attribute, 0)) if attribute else 0
+            attribute_bonus = attribute_check_bonus(attribute_value) if attribute else 0.0
             modifier = skill_bonus + attribute_bonus
 
             mechanical_result = resolve_check(reason=reason, difficulty=difficulty, modifier=modifier)
             mechanical_result["skill"] = skill
             mechanical_result["attribute"] = attribute
+            mechanical_result["attribute_value"] = attribute_value
             mechanical_result["skill_bonus"] = skill_bonus
             mechanical_result["attribute_bonus"] = attribute_bonus
 
@@ -89,7 +123,8 @@ class GameMaster:
             resolved_context["mechanical_result"] = mechanical_result
             resolved_context["mechanical_instruction"] = (
                 "The rules engine has resolved the requested check using the character's stored skill "
-                "and canonical 0-60 attribute scaling. Obey this result exactly, do not reroll, and narrate its consequence."
+                "bonus and canonical 0-60 attribute scaling. Obey this result exactly, do not reroll, "
+                "and narrate its consequence."
             )
             result = self.provider.respond(resolved_context)
             result["requires_roll"] = False
@@ -108,7 +143,8 @@ class GameMaster:
             if mechanical_result:
                 turn_record += (f"\nMechanical check: {mechanical_result['reason']} | skill "
                                 f"{mechanical_result.get('skill') or 'none'} | attribute "
-                                f"{mechanical_result.get('attribute') or 'none'} | d20 "
+                                f"{mechanical_result.get('attribute') or 'none'} "
+                                f"({mechanical_result.get('attribute_value', 0)}) | d20 "
                                 f"{mechanical_result['rolls'][0]} + {mechanical_result['modifier']} = "
                                 f"{mechanical_result['total']} vs DC {mechanical_result['dc']} | "
                                 f"{mechanical_result['outcome']}")
