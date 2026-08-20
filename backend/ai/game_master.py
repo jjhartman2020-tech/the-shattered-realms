@@ -198,6 +198,30 @@ class GameMaster:
         actor["defeated"] = False
         return actor
 
+    def _build_enemy_from_spec(self, raw_enemy: Dict) -> Dict:
+        overrides = {
+            "armor_class": int(raw_enemy.get("armor_class", 10)),
+            "damage": str(raw_enemy.get("damage", "1d4")),
+            "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")),
+            "role": str(raw_enemy.get("role", "fighter")),
+            "attack_bonus": int(raw_enemy.get("attack_bonus", 0)),
+        }
+        if raw_enemy.get("position") is not None:
+            overrides["position"] = raw_enemy.get("position")
+        if raw_enemy.get("attack_range") is not None:
+            overrides["attack_range"] = int(raw_enemy.get("attack_range"))
+        enemy_hp = int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None
+        if enemy_hp is not None:
+            overrides["max_hp"] = enemy_hp
+        return build_combatant(
+            str(raw_enemy.get("name") or "Enemy"),
+            "enemy",
+            normalize_attributes(raw_enemy.get("attributes") or {}),
+            level=int(raw_enemy.get("level", 1)),
+            hp=enemy_hp,
+            overrides=overrides,
+        )
+
     def _start_combat(self, request: Dict) -> Dict:
         snapshot = self.state.snapshot()
         player = snapshot.get("player", {})
@@ -215,22 +239,21 @@ class GameMaster:
             for actor in template.get("combatants", [])
             if isinstance(actor, dict) and actor.get("team") == "enemy"
         ]
+        pending_specs = [
+            enemy for enemy in snapshot.get("pending_encounter_enemies", [])
+            if isinstance(enemy, dict)
+        ] if isinstance(snapshot.get("pending_encounter_enemies"), list) else []
+        request_specs = [enemy for enemy in request.get("enemies", []) if isinstance(enemy, dict)]
 
-        if reset_pending and template_enemies:
+        # A reset with an explicitly reconfigured enemy list must replace the old template.
+        # A plain reset reuses the pristine old template exactly, even if the AI happens to
+        # regenerate enemy data in the following start request.
+        if reset_pending and pending_specs:
+            combatants.extend(self._build_enemy_from_spec(enemy) for enemy in pending_specs)
+        elif reset_pending and template_enemies:
             combatants.extend(template_enemies)
         else:
-            for raw_enemy in request.get("enemies", []):
-                if not isinstance(raw_enemy, dict):
-                    continue
-                overrides = {"armor_class": int(raw_enemy.get("armor_class", 10)), "damage": str(raw_enemy.get("damage", "1d4")), "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")), "role": str(raw_enemy.get("role", "fighter")), "attack_bonus": int(raw_enemy.get("attack_bonus", 0))}
-                if raw_enemy.get("position") is not None:
-                    overrides["position"] = raw_enemy.get("position")
-                if raw_enemy.get("attack_range") is not None:
-                    overrides["attack_range"] = int(raw_enemy.get("attack_range"))
-                enemy_hp = int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None
-                if enemy_hp is not None:
-                    overrides["max_hp"] = enemy_hp
-                combatants.append(build_combatant(str(raw_enemy.get("name") or "Enemy"), "enemy", normalize_attributes(raw_enemy.get("attributes") or {}), level=int(raw_enemy.get("level", 1)), hp=enemy_hp, overrides=overrides))
+            combatants.extend(self._build_enemy_from_spec(enemy) for enemy in request_specs)
 
         if len(combatants) == 1:
             raise ValueError("Combat start requires at least one enemy")
@@ -246,6 +269,7 @@ class GameMaster:
             actor["defeated"] = False
         self.state.set_path("encounter_template", {"combatants": pristine.get("combatants", []), "grid": pristine.get("grid", {})}, save=False)
         self.state.set_path("encounter_reset_pending", False, save=False)
+        self.state.set_path("pending_encounter_enemies", [], save=False)
         self.state.save()
         return combat
 
