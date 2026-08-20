@@ -37,7 +37,9 @@ class GameMaster:
                 "state": self.state.snapshot(),
             }
 
-        relevant_memories = self.memory.search(action)
+        # Give every turn both relevant memories and enough recent canon to keep
+        # the scene coherent even when the player's wording changes.
+        relevant_memories = self.memory.context_for(action)
         relevant_rules = self.rules.retrieve(action)
         context = self.context_builder.build(
             player_action=action,
@@ -51,18 +53,27 @@ class GameMaster:
         self.state.apply_changes(changes)
 
         for memory in result.get("memories", []):
-            if isinstance(memory, str):
-                self.memory.remember(memory)
-            elif isinstance(memory, dict):
-                self.memory.remember(
-                    memory.get("text", ""),
-                    category=memory.get("category", "event"),
-                    importance=memory.get("importance", 1),
-                    confirmed=memory.get("confirmed", True),
-                )
+            self._store_memory(memory, default_category="event")
+
+        # The provider can separately return freshly invented world facts such
+        # as a tavern layout, NPC identity, local rumor, landmark, or discovery.
+        for note in result.get("world_notes", []):
+            self._store_memory(note, default_category="world")
 
         result["state"] = self.state.snapshot()
+        result["memory_count"] = len(self.memory.all())
         return result
+
+    def _store_memory(self, memory, default_category: str) -> None:
+        if isinstance(memory, str):
+            self.memory.remember(memory, category=default_category, importance=2)
+        elif isinstance(memory, dict):
+            self.memory.remember(
+                memory.get("text", ""),
+                category=memory.get("category", default_category),
+                importance=memory.get("importance", 2),
+                confirmed=memory.get("confirmed", True),
+            )
 
     def advance_world(self, elapsed_days: int) -> Dict:
         """Advance independent world activity and apply resulting state changes."""
