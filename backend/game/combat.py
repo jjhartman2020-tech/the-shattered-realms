@@ -1,4 +1,8 @@
-"""Authoritative combat engine for The Shattered Realms."""
+"""Authoritative combat engine for The Shattered Realms.
+
+Combat follows the documented combat framework and canonical 0-30 attributes.
+The rules engine owns mechanical values; AI narration must not invent results.
+"""
 
 from copy import deepcopy
 from typing import Dict, List
@@ -26,15 +30,18 @@ def start_combat(combatants: List[Dict]) -> Dict:
         attrs = normalize_attributes(actor.get("attributes"))
         channels = character_sheet_channels(attrs, actor.get("level", 1))
         actor["attributes"] = attrs
+        actor["attribute_channels"] = channels
         actor.setdefault("hp", channels["max_health_base"])
-        actor.setdefault("max_hp", actor["hp"])
+        actor.setdefault("max_hp", channels["max_health_base"])
+        actor.setdefault("mana", channels["max_mana_base"])
+        actor.setdefault("max_mana", channels["max_mana_base"])
         actor.setdefault("armor_class", 10 + channels["defense_bonus"])
         actor.setdefault("attack_bonus", 0)
-        actor.setdefault("damage_bonus", channels["strength_damage_bonus"])
         actor.setdefault("damage", "1d4")
         actor.setdefault("movement", channels["movement"])
         actor.setdefault("critical_chance_percent", channels["critical_chance_percent"])
         actor.setdefault("physical_resistance_percent", channels["physical_resistance_percent"])
+        actor.setdefault("status_resistance_percent", channels["status_resistance_percent"])
         actor["defeated"] = int(actor["hp"]) <= 0
         prepared.append(actor)
         initiative.append(roll_initiative(actor["name"], attrs, actor.get("initiative_bonus", 0)))
@@ -73,41 +80,54 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
 
     attrs = normalize_attributes(attacker.get("attributes"))
     channels = character_sheet_channels(attrs, attacker.get("level", 1))
-    stat_accuracy = channels["dexterity_attack_accuracy"] if attack_attribute == "dexterity" else channels["strength_attack_accuracy"]
-    bonus = int(attacker.get("attack_bonus", 0) if attack_bonus is None else attack_bonus) + int(stat_accuracy)
+    if attack_attribute == "dexterity":
+        stat_accuracy = int(channels["dexterity_attack_accuracy"])
+        default_damage_bonus = 0
+    else:
+        attack_attribute = "strength"
+        stat_accuracy = int(channels["strength_attack_accuracy"])
+        default_damage_bonus = int(channels["strength_damage_bonus"])
 
+    other_bonus = int(attacker.get("attack_bonus", 0) if attack_bonus is None else attack_bonus)
+    total_attack_bonus = stat_accuracy + other_bonus
     attack = roll("1d20")
     natural = int(attack["rolls"][0])
-    total = int(attack["total"]) + bonus
+    total = int(attack["total"]) + total_attack_bonus
     armor_class = int(target.get("armor_class", 10))
     automatic_miss = natural == 1
-    crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
-    critical = natural == 20
-    hit = False if automatic_miss else (True if critical else total >= armor_class)
-    damage, damage_rolls = 0, []
+    automatic_hit = natural == 20
+    hit = False if automatic_miss else (True if automatic_hit else total >= armor_class)
 
-    default_damage_bonus = channels["strength_damage_bonus"] if attack_attribute == "strength" else 0
-    applied_damage_bonus = int(attacker.get("damage_bonus", default_damage_bonus) if damage_bonus is None else damage_bonus)
+    crit_chance = int(attacker.get("critical_chance_percent", channels["critical_chance_percent"]))
+    crit_roll = int(roll("1d100")["total"]) if hit else None
+    critical = bool(hit and crit_roll is not None and crit_roll <= crit_chance)
+
+    applied_damage_bonus = int(default_damage_bonus if damage_bonus is None else damage_bonus)
+    damage, damage_rolls, raw_damage, resistance_percent = 0, [], 0, 0
     if hit:
         expression = damage_expression or str(attacker.get("damage", "1d4"))
         first = roll(expression)
         damage_rolls.append(first)
         raw_damage = int(first["total"]) + applied_damage_bonus
         if critical:
-            second = roll(expression)
-            damage_rolls.append(second)
-            raw_damage += int(second["total"])
-        resistance_percent = int(target.get("physical_resistance_percent", 0)) if attack_attribute in {"strength", "dexterity"} else 0
+            extra = roll(expression)
+            damage_rolls.append(extra)
+            raw_damage += int(extra["total"])
+        resistance_percent = int(target.get("physical_resistance_percent", 0))
         damage = max(0, round(raw_damage * (100 - resistance_percent) / 100))
         target["hp"] = max(0, int(target.get("hp", 0)) - damage)
         target["defeated"] = target["hp"] <= 0
 
-    outcome = {"attacker": attacker_name, "target": target_name, "d20": natural,
-               "attack_attribute": attack_attribute, "attack_bonus": bonus,
-               "attack_total": total, "armor_class": armor_class,
-               "hit": hit, "critical": critical, "critical_chance_percent": crit_chance,
-               "damage": damage, "damage_bonus": applied_damage_bonus,
-               "damage_rolls": damage_rolls, "target_hp": int(target.get("hp", 0)),
+    outcome = {"attacker": attacker_name, "target": target_name,
+               "attack_attribute": attack_attribute, "d20": natural,
+               "stat_accuracy_bonus": stat_accuracy, "other_attack_bonus": other_bonus,
+               "attack_bonus": total_attack_bonus, "attack_total": total,
+               "armor_class": armor_class, "hit": hit, "critical": critical,
+               "critical_roll": crit_roll, "critical_chance_percent": crit_chance,
+               "damage_bonus": applied_damage_bonus, "raw_damage": raw_damage,
+               "physical_resistance_percent": resistance_percent,
+               "damage": damage, "damage_rolls": damage_rolls,
+               "target_hp": int(target.get("hp", 0)),
                "target_max_hp": int(target.get("max_hp", target.get("hp", 0))),
                "target_defeated": bool(target.get("defeated"))}
     combat.setdefault("log", []).append(outcome)
