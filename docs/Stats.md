@@ -1,6 +1,6 @@
 # Stats.md
 
-Version: 1.3
+Version: 1.4
 Status: In Development
 
 ---
@@ -21,10 +21,11 @@ Status: In Development
 12. Wisdom
 13. Charisma
 14. Speed
-15. Attribute Milestones
-16. Attribute Requirements
-17. Balancing
-18. Future Attributes
+15. Defense
+16. Attribute Milestones
+17. Attribute Requirements
+18. Balancing
+19. Future Attributes
 
 ---
 
@@ -48,7 +49,7 @@ Status: In Development
 - Every new character begins with **60 Attribute Points**.
 - Players may distribute these points however they choose.
 - AI-generated classes provide a recommended starting allocation, but players can freely modify it before beginning the game.
-- The nine attributes are Health, Mana, Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma, and Speed.
+- The ten attributes are **Health, Mana, Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma, Speed, and Defense**.
 
 ---
 
@@ -79,31 +80,29 @@ These formulas define the first playable balance pass for the 0-30 system.
 
 ## Universal Attribute Modifier
 
-For d20 rolls, every full 3 points in the relevant attribute grants +1.
+For d20 rolls and other systems that use the universal modifier, every full 3 points in the relevant attribute grants +1.
 
 `Attribute Modifier = floor(Attribute / 3)`
 
-There are no fractional roll modifiers.
+There are no fractional modifiers.
 
 Examples:
 
-- 0-2 Strength = +0
-- 3-5 Strength = +1
-- 6-8 Strength = +2
-- 9-11 Strength = +3
-- 12-14 Strength = +4
-- 15-17 Strength = +5
-- 18-20 Strength = +6
-- 21-23 Strength = +7
-- 24-26 Strength = +8
-- 27-29 Strength = +9
-- 30 Strength = +10
+- 0-2 = +0
+- 3-5 = +1
+- 6-8 = +2
+- 9-11 = +3
+- 12-14 = +4
+- 15-17 = +5
+- 18-20 = +6
+- 21-23 = +7
+- 24-26 = +8
+- 27-29 = +9
+- 30 = +10
 
 Example: **17 Strength gives +5 to Strength rolls.**
 
-The same modifier rule applies to Dexterity, Constitution, Intelligence, Wisdom, Charisma, and Speed rolls.
-
-The AI Game Master chooses which attribute is relevant, but the engine calculates the modifier.
+The same threshold rule applies whenever an attribute is explicitly using the universal modifier.
 
 ## Attack Accuracy
 
@@ -115,15 +114,41 @@ Attack rolls use the same whole-number attribute modifier:
 
 Weapons, abilities, conditions, positioning, and proficiency systems may add separate modifiers.
 
-## Defense
+## Passive Defense / Base Armor Class
 
 Base Armor Class is 10 before equipment and temporary effects.
 
-Natural defensive contribution uses whole numbers:
+Natural passive defensive contribution remains:
 
 `Defense Bonus = floor(Dexterity / 9) + floor(Constitution / 15) + floor(Speed / 15)`
 
-This keeps defensive stats relevant while preventing raw attributes alone from making characters nearly unhittable.
+This represents reflexes, toughness, and movement while fighting normally. The separate **Defense attribute does not permanently add its full modifier to AC**; it powers the active Defend action instead.
+
+## Active Defend Action
+
+Defense is a dedicated 0-30 attribute for characters who invest in guarding, blocking, bracing, and defensive combat technique.
+
+When a combatant spends their primary action to **Defend**:
+
+`Defend AC Bonus = floor(Defense / 3)`
+
+The bonus lasts until the start of that combatant's next turn.
+
+Examples:
+
+- Defense 0-2 = +0 AC while Defending
+- Defense 3-5 = +1 AC
+- Defense 6-8 = +2 AC
+- Defense 9-11 = +3 AC
+- Defense 12-14 = +4 AC
+- Defense 15-17 = +5 AC
+- Defense 18-20 = +6 AC
+- Defense 21-23 = +7 AC
+- Defense 24-26 = +8 AC
+- Defense 27-29 = +9 AC
+- Defense 30 = +10 AC
+
+This bonus is temporary and applies only while the Defend action is active.
 
 ## Initiative
 
@@ -149,7 +174,7 @@ At 30 Strength, the natural Strength damage bonus is +5 before weapon, ability, 
 
 ### Accuracy Margin Damage
 
-A successful attack that beats the target's Armor Class by a large amount deals extra precision/quality damage. This makes a very accurate hit meaningfully better than a hit that barely connects.
+A successful attack that beats the target's Armor Class by a large amount deals extra precision/quality damage.
 
 `Accuracy Margin = max(0, Attack Total - Armor Class)`
 
@@ -175,7 +200,7 @@ Base critical chance is 5% unless a weapon, ability, or campaign rule states oth
 
 At 30 Dexterity, natural critical chance is 15% before other effects.
 
-A **natural 20 on an attack roll is always a critical hit** regardless of the normal critical-chance roll. A critical hit rolls the attack's weapon damage dice one additional time, while flat damage bonuses are added only once. Non-natural-20 hits may still become critical hits through the normal Critical Chance formula.
+A **natural 20 on an attack roll is always a critical hit**. A critical hit rolls the attack's weapon damage dice one additional time, while flat damage bonuses are added only once. Non-natural-20 hits may still become critical hits through the normal Critical Chance formula.
 
 ## Physical Resistance
 
@@ -195,191 +220,117 @@ These formulas are balance constants and may be tuned later, but changes must re
 
 # 6. Health
 
-## Description
-
 Health directly increases the character's Maximum Health pool.
-
-## Combat Effects
 
 `Maximum Health = max(1, Health + 5 x (Level - 1))`
 
 The +5 per level comes from the progression system and is separate from Attribute Point spending.
 
-## World Effects
-
-Health may be referenced by survival challenges, endurance events, environmental hazards, and campaign-specific mechanics.
+Health may also be referenced by survival challenges, endurance events, environmental hazards, and campaign-specific mechanics.
 
 ---
 
 # 7. Mana
 
-## Description
-
 Mana directly determines the character's base Maximum Mana.
-
-## Spellcasting
 
 `Maximum Mana = Mana`
 
-Abilities may consume Mana according to their own documented costs.
-
-## Mana Regeneration
-
-Regeneration rules are defined separately and are not created by the Mana stat unless an ability or effect says otherwise.
+Abilities may consume Mana according to their own documented costs. Regeneration rules are defined separately.
 
 ---
 
 # 8. Strength
 
-## Description
-
 Strength represents raw physical power.
 
-## Rolls
-
-Strength rolls use `floor(Strength / 3)`.
-
-## Damage
-
-Strength-based physical damage gains `floor(Strength / 6)` bonus damage.
-
-## Accuracy
-
-Strength-based melee attacks use the Strength modifier for attack accuracy.
-
-## Weapon Requirements
-
-Weapons may require a minimum raw Strength value.
-
-## Environmental Interaction
-
-Strength governs forcing doors, lifting, breaking, grappling, shoving, and similar physical actions.
+- Strength rolls use `floor(Strength / 3)`.
+- Strength-based physical damage gains `floor(Strength / 6)` bonus damage.
+- Strength-based melee attacks use the Strength modifier for attack accuracy.
+- Weapons may require a minimum raw Strength value.
+- Strength governs forcing doors, lifting, breaking, grappling, shoving, and similar actions.
 
 ---
 
 # 9. Dexterity
 
-## Description
-
 Dexterity represents precision, coordination, finesse, and reflex control.
 
-## Rolls
-
-Dexterity rolls use `floor(Dexterity / 3)`.
-
-## Accuracy
-
-Finesse and ranged attacks use the Dexterity modifier for accuracy.
-
-## Critical Chance
-
-Dexterity increases critical chance using the universal Critical Chance formula.
-
-## Dodge
-
-Dexterity contributes to natural Defense.
+- Dexterity rolls use `floor(Dexterity / 3)`.
+- Finesse and ranged attacks use the Dexterity modifier for accuracy.
+- Dexterity increases critical chance.
+- Dexterity contributes to passive natural Defense.
 
 ---
 
 # 10. Constitution
 
-## Description
-
 Constitution represents physical toughness and resistance.
 
-## Rolls
-
-Constitution rolls use `floor(Constitution / 3)`.
-
-## Defense
-
-Constitution contributes to natural Defense.
-
-## Physical Resistance
-
-Constitution provides 1% physical resistance for every full 3 points.
-
-## Status Resistance
-
-Constitution provides 2% status resistance for every full 3 points.
+- Constitution rolls use `floor(Constitution / 3)`.
+- Constitution contributes to passive natural Defense.
+- Constitution provides 1% physical resistance for every full 3 points.
+- Constitution provides 2% status resistance for every full 3 points.
 
 ---
 
 # 11. Intelligence
 
-## Description
-
 Intelligence represents reasoning, technical knowledge, arcane understanding, and learned expertise.
 
-## Rolls
-
-Intelligence rolls use `floor(Intelligence / 3)`.
-
-## Spell Power
-
-Intelligence-based spell systems may use the Intelligence modifier and raw Intelligence for requirements. Exact spell damage rules remain part of the magic system.
+- Intelligence rolls use `floor(Intelligence / 3)`.
+- Intelligence-based spell systems may use the Intelligence modifier and raw Intelligence for requirements.
 
 ---
 
 # 12. Wisdom
 
-## Description
-
 Wisdom represents awareness, judgment, intuition, and spiritual understanding.
 
-## Rolls
-
-Wisdom rolls use `floor(Wisdom / 3)`.
-
-## Healing and Divine Magic
-
-Wisdom-based healing and divine systems may use the Wisdom modifier and raw Wisdom for requirements.
+- Wisdom rolls use `floor(Wisdom / 3)`.
+- Wisdom-based healing and divine systems may use the Wisdom modifier and raw Wisdom for requirements.
 
 ---
 
 # 13. Charisma
 
-## Description
-
 Charisma represents presence, influence, leadership, and social force.
 
-## Rolls
-
-Persuasion, Deception, Intimidation, Performance, leadership, and similar Charisma rolls use `floor(Charisma / 3)` unless context makes another attribute more appropriate.
-
-## Trading
-
-Baseline trading influence improves by 1% for every full 3 Charisma, up to 10% at 30 Charisma.
-
-Exact merchant pricing remains part of the economy system.
+- Persuasion, Deception, Intimidation, Performance, leadership, and similar Charisma rolls use `floor(Charisma / 3)` unless context makes another attribute more appropriate.
+- Baseline trading influence improves by 1% for every full 3 Charisma, up to 10% at 30 Charisma.
 
 ---
 
 # 14. Speed
 
-## Description
-
 Speed represents movement quickness, reaction speed, and combat tempo.
 
-## Rolls
-
-Speed rolls use `floor(Speed / 3)`.
-
-## Movement
-
-Movement follows the universal movement formula.
-
-## Initiative
-
-Speed is the primary initiative attribute.
-
-## Dodge
-
-Speed contributes to natural Defense.
+- Speed rolls use `floor(Speed / 3)`.
+- Movement follows the universal movement formula.
+- Speed is the primary initiative attribute.
+- Speed contributes to passive natural Defense.
 
 ---
 
-# 15. Attribute Milestones
+# 15. Defense
+
+Defense represents deliberate guarding skill, blocking technique, bracing, stance control, and the ability to protect yourself when focusing on defense.
+
+## Active Defense
+
+Defense is primarily used by the **Defend** combat action.
+
+`Defend AC Bonus = floor(Defense / 3)`
+
+Every full 3 points of Defense therefore adds +1 AC while actively Defending.
+
+Defense does not automatically replace Dexterity, Constitution, or Speed in passive AC. Passive defense and active Defense investment are separate so a character must choose whether to spend a primary action to gain the larger temporary protection.
+
+Equipment, shields, abilities, statuses, and special mechanics may add additional defensive bonuses separately.
+
+---
+
+# 16. Attribute Milestones
 
 Specific abilities, equipment, dialogue options, and world interactions may require raw attribute thresholds.
 
@@ -387,7 +338,7 @@ Milestones must be defined by the relevant system rather than automatically gran
 
 ---
 
-# 16. Attribute Requirements
+# 17. Attribute Requirements
 
 Raw attribute values may be used as requirements for weapons, armor, shields, magic, companions, dialogue, abilities, and environmental interactions.
 
@@ -395,7 +346,7 @@ Requirements must always be visible or logically discoverable to the player when
 
 ---
 
-# 17. Balancing
+# 18. Balancing
 
 ## AI Validation
 
@@ -404,8 +355,9 @@ The AI Game Master may choose the relevant attribute, target difficulty, or cont
 ## Preventing Overpowered Builds
 
 - Raw base attributes cap at 30.
-- Core attribute roll modifiers cap naturally at +10.
-- Defense pulls from several attributes at slower rates.
+- Core attribute modifiers cap naturally at +10.
+- Passive Defense pulls from several attributes at slower rates.
+- The Defense attribute's large AC scaling requires spending the character's primary action to activate it.
 - Combat difficulty should rely on tactics, positioning, resources, and enemy behavior rather than stat inflation alone.
 
 ## Respec Rules
@@ -414,8 +366,8 @@ Respec rules remain to be finalized.
 
 ---
 
-# 18. Future Attributes
+# 19. Future Attributes
 
 Possible future stats include Luck, Faith, Corruption, and Reputation.
 
-These are not part of the nine-attribute base progression unless formally added to the progression documentation.
+These are not part of the ten-attribute base progression unless formally added to the progression documentation.
