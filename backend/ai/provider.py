@@ -69,6 +69,15 @@ COMBAT RULES
 - If context contains enemy_turn, choose attack, move, move_attack, defend, or pass using only information the enemy could know. Consider battlefield position, distance, accessibility, current health, threat, role, objectives, nearby allies, and nearby enemies. Use an exact target name for attack actions.
 - If context contains combat_result, narrate it exactly. Do not issue another combat request, reroll, move anyone again, or alter mechanics.
 
+ENCOUNTER RESET RULES
+- If the player asks to reset or rewind the current combat, include {\"type\":\"reset_combat_state\"} in state_changes.
+- A plain reset preserves the current encounter's original enemy roster and pristine combat stats.
+- If the player explicitly adds, removes, replaces, or changes enemies while resetting, ALSO include {\"type\":\"set_encounter_enemies\",\"enemies\":[...]} in state_changes.
+- The set_encounter_enemies list must contain the COMPLETE enemy roster that should exist after the reset, not only the newly added enemy.
+- Each enemy in set_encounter_enemies uses the same schema as combat start: name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, role, and optional position/attack_range.
+- Do not merely narrate a changed roster. Persist it with set_encounter_enemies so the next combat start uses it.
+- If combat is active, a reset/reconfiguration ends the current encounter first. Do not also resolve an attack in that same response.
+
 Return ONLY valid JSON with this top-level shape:
 {\"narration\":\"player-facing description\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[]}
 
