@@ -32,6 +32,7 @@ DEFAULT_STATE = {
     },
     "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {},
     "combat": {"active": False}, "encounter_template": {}, "encounter_reset_pending": False,
+    "pending_encounter_enemies": [],
     "turn": 0,
 }
 
@@ -75,6 +76,9 @@ class GameState:
             actor["mana"] = max_mana
             actor["max_mana"] = max_mana
             actor["movement_used"] = 0
+            actor["primary_action_used"] = False
+            actor["defending"] = False
+            actor["active_defense_ac_bonus"] = 0
             actor["defeated"] = False
             actors.append(actor)
         return {"combatants": actors, "grid": deepcopy(combat.get("grid", {}))}
@@ -86,6 +90,14 @@ class GameState:
                 continue
 
             change_type = str(change.get("type") or "").strip().lower()
+            if change_type == "set_encounter_enemies":
+                enemies = change.get("enemies")
+                if isinstance(enemies, list):
+                    self.data["pending_encounter_enemies"] = [
+                        deepcopy(enemy) for enemy in enemies if isinstance(enemy, dict)
+                    ]
+                continue
+
             if change_type == "reset_combat_state":
                 current_combat = self.data.get("combat")
                 if isinstance(current_combat, dict) and current_combat.get("combatants"):
