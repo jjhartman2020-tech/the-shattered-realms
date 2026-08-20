@@ -13,7 +13,7 @@ from backend.game.attributes import (
     normalize_attributes,
 )
 from backend.game.checks import resolve_check
-from backend.game.combat import current_actor, end_turn, resolve_attack, start_combat
+from backend.game.combat import current_actor, end_turn, move_actor, resolve_attack, start_combat
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
 
@@ -123,29 +123,43 @@ class GameMaster:
                 })
                 combat_results.extend(self._run_enemy_turns(active_combat))
                 self._persist_combat(active_combat)
-            elif request_type == "attack" and isinstance(active_combat, dict) and active_combat.get("active"):
+
+            elif request_type in {"attack", "move", "move_attack"} and isinstance(active_combat, dict) and active_combat.get("active"):
                 actor = current_actor(active_combat)
                 player_name = str(snapshot.get("player", {}).get("name") or "Traveler")
                 if not actor or actor.get("name") != player_name:
                     combat_results.append({"type": "invalid", "reason": "It is not the player's turn."})
                 else:
-                    target = str(combat_request.get("target") or "").strip()
-                    attack_attribute = str(combat_request.get("attack_attribute") or "strength").lower()
-                    if attack_attribute not in {"strength", "dexterity"}:
-                        attack_attribute = "strength"
                     try:
-                        attack_result = resolve_attack(
-                            active_combat,
-                            player_name,
-                            target,
-                            attack_attribute=attack_attribute,
-                            enforce_turn=True,
-                        )
-                        combat_results.append({"type": "player_attack", **attack_result})
-                        if active_combat.get("active"):
-                            end_turn(active_combat)
-                            combat_results.extend(self._run_enemy_turns(active_combat))
-                    except ValueError as exc:
+                        if request_type in {"move", "move_attack"}:
+                            x = int(combat_request.get("x"))
+                            y = int(combat_request.get("y"))
+                            movement = move_actor(
+                                active_combat,
+                                player_name,
+                                x,
+                                y,
+                                enforce_turn=True,
+                            )
+                            combat_results.append({"type": "player_move", **movement})
+
+                        if request_type in {"attack", "move_attack"}:
+                            target = str(combat_request.get("target") or "").strip()
+                            attack_attribute = str(combat_request.get("attack_attribute") or "strength").lower()
+                            if attack_attribute not in {"strength", "dexterity"}:
+                                attack_attribute = "strength"
+                            attack_result = resolve_attack(
+                                active_combat,
+                                player_name,
+                                target,
+                                attack_attribute=attack_attribute,
+                                enforce_turn=True,
+                            )
+                            combat_results.append({"type": "player_attack", **attack_result})
+                            if active_combat.get("active"):
+                                end_turn(active_combat)
+                                combat_results.extend(self._run_enemy_turns(active_combat))
+                    except (TypeError, ValueError) as exc:
                         combat_results.append({"type": "invalid", "reason": str(exc)})
                     self._persist_combat(active_combat)
 
@@ -154,8 +168,9 @@ class GameMaster:
             resolved_context["active_combat"] = active_combat
             resolved_context["combat_result"] = combat_results
             resolved_context["mechanical_instruction"] = (
-                "Python has resolved combat. Narrate the listed initiative, attacks, damage, HP, "
-                "critical results, defeats, and turn progression exactly. Do not reroll or alter them."
+                "Python has resolved combat. Narrate movement, remaining movement, initiative, attacks, "
+                "range, damage, HP, critical results, defeats, and turn progression exactly. "
+                "Do not reroll, move characters again, or alter the results."
             )
             narrated = self.provider.respond(resolved_context)
             narrated["combat_request"] = None
@@ -243,6 +258,7 @@ class GameMaster:
                 "armor_class": int(player.get("armor_class", 10)),
                 "damage": str(player.get("damage", "1d6")),
                 "attack_bonus": int(player.get("attack_bonus", 0)),
+                "position": player.get("combat_position", {"x": 0, "y": 0}),
             },
         )
 
@@ -252,19 +268,24 @@ class GameMaster:
                 continue
             enemy_attrs = normalize_attributes(raw_enemy.get("attributes") or {})
             name = str(raw_enemy.get("name") or "Enemy")
+            overrides = {
+                "armor_class": int(raw_enemy.get("armor_class", 10)),
+                "damage": str(raw_enemy.get("damage", "1d4")),
+                "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")),
+                "role": str(raw_enemy.get("role", "fighter")),
+                "attack_bonus": int(raw_enemy.get("attack_bonus", 0)),
+            }
+            if raw_enemy.get("position") is not None:
+                overrides["position"] = raw_enemy.get("position")
+            if raw_enemy.get("attack_range") is not None:
+                overrides["attack_range"] = int(raw_enemy.get("attack_range"))
             enemy = build_combatant(
                 name,
                 "enemy",
                 enemy_attrs,
                 level=int(raw_enemy.get("level", 1)),
                 hp=int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None,
-                overrides={
-                    "armor_class": int(raw_enemy.get("armor_class", 10)),
-                    "damage": str(raw_enemy.get("damage", "1d4")),
-                    "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")),
-                    "role": str(raw_enemy.get("role", "fighter")),
-                    "attack_bonus": int(raw_enemy.get("attack_bonus", 0)),
-                },
+                overrides=overrides,
             )
             combatants.append(enemy)
 
@@ -287,7 +308,7 @@ class GameMaster:
                 player_action=f"Enemy turn: {actor.get('name')}",
                 game_state=snapshot,
                 memories=self.memory.context_for(str(actor.get("name"))),
-                rules=self.rules.retrieve("enemy combat tactics target selection"),
+                rules=self.rules.retrieve("enemy combat tactics target selection positioning movement"),
             )
             enemy_context["active_combat"] = combat
             enemy_context["enemy_turn"] = {
@@ -298,12 +319,22 @@ class GameMaster:
             request = decision.get("combat_request") or {}
             request_type = str(request.get("type") or "").lower() if isinstance(request, dict) else ""
 
-            if request_type == "attack":
-                target = str(request.get("target") or player_name)
-                attack_attribute = str(request.get("attack_attribute") or actor.get("attack_attribute", "strength")).lower()
-                if attack_attribute not in {"strength", "dexterity"}:
-                    attack_attribute = "strength"
-                try:
+            try:
+                if request_type in {"move", "move_attack"}:
+                    movement = move_actor(
+                        combat,
+                        str(actor.get("name")),
+                        int(request.get("x")),
+                        int(request.get("y")),
+                        enforce_turn=True,
+                    )
+                    results.append({"type": "enemy_move", **movement})
+
+                if request_type in {"attack", "move_attack"}:
+                    target = str(request.get("target") or player_name)
+                    attack_attribute = str(request.get("attack_attribute") or actor.get("attack_attribute", "strength")).lower()
+                    if attack_attribute not in {"strength", "dexterity"}:
+                        attack_attribute = "strength"
                     attack = resolve_attack(
                         combat,
                         str(actor.get("name")),
@@ -312,10 +343,10 @@ class GameMaster:
                         enforce_turn=True,
                     )
                     results.append({"type": "enemy_attack", **attack})
-                except ValueError as exc:
-                    results.append({"type": "enemy_invalid", "actor": actor.get("name"), "reason": str(exc)})
-            else:
-                results.append({"type": "enemy_pass", "actor": actor.get("name")})
+                elif request_type not in {"move"}:
+                    results.append({"type": "enemy_pass", "actor": actor.get("name")})
+            except (TypeError, ValueError) as exc:
+                results.append({"type": "enemy_invalid", "actor": actor.get("name"), "reason": str(exc)})
 
             if combat.get("active"):
                 end_turn(combat)
@@ -331,6 +362,7 @@ class GameMaster:
                 self.state.set_path("player.max_hp", int(actor.get("max_hp", 0)), save=False)
                 self.state.set_path("player.mana", int(actor.get("mana", 0)), save=False)
                 self.state.set_path("player.max_mana", int(actor.get("max_mana", 0)), save=False)
+                self.state.set_path("player.combat_position", actor.get("position", {"x": 0, "y": 0}), save=False)
                 break
         self.state.save()
 
