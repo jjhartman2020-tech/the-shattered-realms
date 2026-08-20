@@ -20,21 +20,14 @@ class DevelopmentProvider:
     def respond(self, context: Dict) -> Dict:
         action = context.get("player_action", "").strip()
         return {
-            "narration": (
-                "The Game Master core received your action and assembled the "
-                "campaign context. Set OPENAI_API_KEY to enable the live AI."
-            ),
+            "narration": "The Game Master core received your action and assembled the campaign context. Set OPENAI_API_KEY to enable the live AI.",
             "player_action": action,
             "requires_roll": False,
             "roll": None,
             "state_changes": [],
             "memories": [],
             "world_notes": [],
-            "debug": {
-                "provider": "development",
-                "rules_found": len(context.get("relevant_rules", [])),
-                "memories_found": len(context.get("relevant_memories", [])),
-            },
+            "debug": {"provider": "development"},
         }
 
 
@@ -45,58 +38,32 @@ class OpenAIProvider:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError(
-                "The OpenAI Python package is not installed. Run: pip install openai"
-            ) from exc
-
+            raise RuntimeError("The OpenAI Python package is not installed. Run: pip install openai") from exc
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is not set.")
-
         self.client = OpenAI(api_key=api_key)
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
     def respond(self, context: Dict) -> Dict:
         system_instructions = """You are the AI Game Master for The Shattered Realms.
-You are a neutral, fair, imaginative, adaptive facilitator. Player agency,
-campaign canon, official game documentation, internal consistency, and logical
-cause-and-effect come before drama or convenience.
-
-Your job is to KEEP THE GAME MOVING. Established facts are binding canon, but
-anything that has not yet been established is open creative space for you to
-invent. Create reasonable new details that fit the genre, current scene, world
-state, and known canon, then treat those new details as established facts.
+Be neutral, fair, imaginative, adaptive, and consistent with established canon.
+Keep the game moving. Invent reasonable undefined creative details rather than
+blocking exploration, while preserving established facts.
 
 MECHANICAL CHECK RULES
-- Ordinary movement, conversation, looking around, and uncontested actions do
-  not need rolls.
-- Risky, contested, uncertain actions whose success matters should request a
-  mechanical check instead of deciding success yourself.
-- On the FIRST pass, if a check is needed, set requires_roll=true and provide a
-  roll object with only a reason and difficulty. Do NOT invent the die result,
-  total, modifier, or success/failure.
-- Allowed difficulty values are: trivial, easy, standard, hard, very_hard,
-  extreme.
-- When context contains mechanical_result, the rules engine has already rolled.
-  You MUST obey that result exactly. Do not reroll, alter the DC, or change the
-  result. Set requires_roll=false and narrate the outcome.
+- Ordinary movement, conversation, looking around, and uncontested actions do not need rolls.
+- Risky, contested, uncertain actions whose success matters require a mechanical check.
+- On the first pass, if a check is needed, set requires_roll=true. Do not invent a die result, modifier, total, or success/failure.
+- Choose the most appropriate skill from: athletics, stealth, sleight_of_hand, perception, investigation, survival, persuasion, deception, intimidation.
+- Choose difficulty from: trivial, easy, standard, hard, very_hard, extreme.
+- Difficulty must reflect the actual situation, opposition, environment, and established facts. Do not manipulate difficulty to force a desired story outcome.
+- When context contains mechanical_result, Python has already resolved the roll using the stored character skill modifier. Obey that result exactly. Never reroll or alter it.
 
-Distinguish between two kinds of uncertainty:
-1. CREATIVE uncertainty: the world has not defined what is there yet. Resolve
-   this yourself by inventing a coherent detail and continue the scene.
-2. MECHANICAL uncertainty: success or failure genuinely depends on a game
-   mechanic, contest, risk, hidden information, or chance. Request a roll and
-   let the rules engine decide.
-
-Never block ordinary exploration with responses like 'this is not established',
-'cannot determine', or 'insufficient information' when you can reasonably create
-the missing world detail. Preserve player intent and keep narration vivid but
-concise.
-
-Return ONLY valid JSON with this exact top-level shape:
+Return ONLY valid JSON with this top-level shape:
 {
-  "narration": "player-facing description, or a brief setup if a roll is required",
-  "player_action": "the action you interpreted",
+  "narration": "player-facing description",
+  "player_action": "interpreted action",
   "requires_roll": false,
   "roll": null,
   "state_changes": [],
@@ -104,26 +71,21 @@ Return ONLY valid JSON with this exact top-level shape:
   "world_notes": []
 }
 
-If requires_roll=true, roll MUST look like:
+When requires_roll=true, roll MUST look like:
 {
-  "reason": "Attempt a difficult task",
-  "difficulty": "standard"
+  "reason": "Sneak past an alert guard",
+  "difficulty": "hard",
+  "skill": "stealth"
 }
 
-state_changes must be conservative, machine-readable changes supported by the
-FINAL resolved turn. Do not apply success/failure state changes before a required
-roll has been resolved. memories should contain newly established facts worth
-preserving for continuity. world_notes may contain newly created local/world
-facts that should remain consistent later. Never include private chain-of-thought
-or hidden reasoning in the response.
+Do not apply success/failure state changes before a required roll is resolved.
+Never include private chain-of-thought or hidden reasoning.
 """
-
         response = self.client.responses.create(
             model=self.model,
             instructions=system_instructions,
             input=serialize_context(context),
         )
-
         raw = response.output_text.strip()
         try:
             result = json.loads(raw)
@@ -137,7 +99,6 @@ or hidden reasoning in the response.
                 "memories": [],
                 "world_notes": [],
             }
-
         result.setdefault("narration", "The world waits...")
         result.setdefault("player_action", context.get("player_action", ""))
         result.setdefault("requires_roll", False)
@@ -155,12 +116,10 @@ or hidden reasoning in the response.
 
 
 def provider_from_environment() -> AIProvider:
-    """Use the live AI when configured; otherwise remain safely offline."""
     if os.getenv("OPENAI_API_KEY", "").strip():
         return OpenAIProvider()
     return DevelopmentProvider()
 
 
 def serialize_context(context: Dict) -> str:
-    """Serialize context for an external model API without leaking Python objects."""
     return json.dumps(context, ensure_ascii=False, indent=2, default=str)
