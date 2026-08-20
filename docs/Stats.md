@@ -1,6 +1,6 @@
 # Stats.md
 
-Version: 1.2
+Version: 1.3
 Status: In Development
 
 ---
@@ -146,6 +146,26 @@ Strength-based physical attacks gain a whole-number damage bonus:
 `Strength Damage Bonus = floor(Strength / 6)`
 
 At 30 Strength, the natural Strength damage bonus is +5 before weapon, ability, and other modifiers.
+
+### Accuracy Margin Damage
+
+A successful attack that beats the target's Armor Class by a large amount deals extra precision/quality damage. This makes a very accurate hit meaningfully better than a hit that barely connects.
+
+`Accuracy Margin = max(0, Attack Total - Armor Class)`
+
+`Accuracy Margin Damage Bonus = floor(Accuracy Margin / 3)`
+
+Examples:
+
+- Attack Total 10 vs AC 10 = +0 damage
+- Attack Total 12 vs AC 10 = +0 damage
+- Attack Total 13 vs AC 10 = +1 damage
+- Attack Total 16 vs AC 10 = +2 damage
+- Attack Total 19 vs AC 10 = +3 damage
+
+This bonus is flat damage and is added once. Critical hits still roll the weapon damage dice one additional time; they do not double the Accuracy Margin Damage Bonus.
+
+A natural 1 is still an automatic miss and deals no damage regardless of bonuses. A natural 20 is still an automatic critical hit.
 
 ## Critical Chance
 
