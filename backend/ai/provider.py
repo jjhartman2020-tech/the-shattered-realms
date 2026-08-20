@@ -48,10 +48,15 @@ COMBAT RULES
 - Each combatant normally has one primary action per turn. Movement uses a separate movement budget and does not consume the primary action.
 - A basic attack consumes the primary action. Defend consumes the primary action. Movement may happen before or after the primary action if movement remains.
 - Defense is a 0-30 attribute. When a combatant takes the Defend action, every full 3 Defense grants +1 temporary AC until the start of that combatant's next turn. Python resolves the exact bonus; never replace it with a flat value.
-- To begin combat return combat_request.type=\"start\" with every newly-created enemy.
+- To begin combat return combat_request.type=\"start\" with EVERY newly-created enemy in the enemies array, not only the first enemy mentioned.
+- Every combatant in an encounter must have a unique name. If multiple enemies share a type, distinguish them with roles or numbers, for example \"Goblin Guard\" and \"Goblin Archer\", or \"Goblin Guard 1\" and \"Goblin Guard 2\".
 - Enemy entries include name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, and role. Position and attack_range may be included when established.
 - Attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed, defense.
 - During active combat use attack, move, move_attack, defend, end_turn, or pass.
+- Attack and move_attack MUST name one specific living target using that combatant's exact name from active_combat. Do not silently switch targets.
+- When the player identifies a target by role or description (for example \"the archer\"), map it to the matching exact combatant name in active_combat.
+- If multiple combatants match an ambiguous player description and the player has not made a target clear, do not choose randomly. Narrate the ambiguity and return combat_request=null so the player can specify a target.
+- Defeating one enemy does not end combat while another opposing combatant remains alive.
 - If the player says they defend, guard, brace, take a defensive stance, or focus on defense, return {\"type\":\"defend\"}.
 - If the player says they end their turn, wait, pass, hold position, or otherwise deliberately finish without another action, return {\"type\":\"end_turn\"}. Do NOT merely narrate that their turn ended.
 - For move return integer x and y. For move_attack return x, y, target, and attack_attribute.
@@ -61,7 +66,7 @@ COMBAT RULES
 - Movement alone does not end the player's turn or spend their primary action.
 - After a player attacks or defends, do not automatically end their turn; they may still move if movement remains, then explicitly end the turn.
 - A combined move_attack is one atomic intended action. Python may reject the whole action; if combat_result says invalid, narrate that no part of the attempted combined action occurred.
-- If context contains enemy_turn, choose attack, move, move_attack, defend, or pass using only information the enemy could know.
+- If context contains enemy_turn, choose attack, move, move_attack, defend, or pass using only information the enemy could know. Consider battlefield position, distance, accessibility, current health, threat, role, objectives, nearby allies, and nearby enemies. Use an exact target name for attack actions.
 - If context contains combat_result, narrate it exactly. Do not issue another combat request, reroll, move anyone again, or alter mechanics.
 
 Return ONLY valid JSON with this top-level shape:
@@ -69,9 +74,9 @@ Return ONLY valid JSON with this top-level shape:
 
 When requires_roll=true, roll must contain reason, difficulty, and skill.
 Combat examples:
-{\"type\":\"attack\",\"target\":\"Goblin Scout\",\"attack_attribute\":\"strength\"}
+{\"type\":\"attack\",\"target\":\"Goblin Archer\",\"attack_attribute\":\"strength\"}
 {\"type\":\"move\",\"x\":4,\"y\":0}
-{\"type\":\"move_attack\",\"x\":4,\"y\":0,\"target\":\"Goblin Scout\",\"attack_attribute\":\"strength\"}
+{\"type\":\"move_attack\",\"x\":4,\"y\":0,\"target\":\"Goblin Guard\",\"attack_attribute\":\"strength\"}
 {\"type\":\"defend\"}
 {\"type\":\"end_turn\"}
 
