@@ -3,15 +3,15 @@
 from backend.ai.game_master import GameMaster
 
 
-def _format_damage_breakdown(event) -> str:
-    """Return a readable breakdown of the engine-resolved attack damage."""
+def _format_damage_breakdown(event, first_label: str = "Weapon") -> str:
+    """Return a readable breakdown of engine-resolved damage."""
     rolls = event.get("damage_rolls") or []
-    weapon_damage = 0
+    base_damage = 0
     critical_dice_damage = 0
     if isinstance(rolls, list) and rolls:
         first = rolls[0]
         if isinstance(first, dict):
-            weapon_damage = int(first.get("total", 0) or 0)
+            base_damage = int(first.get("total", 0) or 0)
         if len(rolls) > 1:
             for extra in rolls[1:]:
                 if isinstance(extra, dict):
@@ -21,9 +21,10 @@ def _format_damage_breakdown(event) -> str:
     accuracy_damage_bonus = int(event.get("accuracy_margin_damage_bonus", 0) or 0)
     resistance = int(event.get("physical_resistance_percent", 0) or 0)
 
-    parts = [f"Weapon: {weapon_damage}"]
+    parts = [f"{first_label}: {base_damage}"]
     if stat_damage_bonus:
-        label = "STR" if event.get("attack_attribute") == "strength" else "Stat"
+        attribute = str(event.get("damage_bonus_attribute") or event.get("attack_attribute") or "Stat").upper()
+        label = "STR" if attribute == "STRENGTH" else attribute[:4]
         parts.append(f"{label}: {stat_damage_bonus:+d}")
     if accuracy_damage_bonus:
         parts.append(f"Accuracy: {accuracy_damage_bonus:+d}")
@@ -59,6 +60,8 @@ def _print_movement_hud(combat) -> None:
     movement_total = int(player.get("movement", 0) or 0)
     movement_used = int(player.get("movement_used", 0) or 0)
     movement_remaining = max(0, movement_total - movement_used)
+    mana = int(player.get("mana", 0) or 0)
+    max_mana = int(player.get("max_mana", mana) or mana)
     x, y = _position_xy(player)
 
     order = combat.get("order") or []
@@ -72,8 +75,8 @@ def _print_movement_hud(combat) -> None:
     print("\n🏃 MOVEMENT HUD")
     print(
         f"Round {round_number} | Position: ({x}, {y}) | "
-        f"Movement: {movement_remaining}/{movement_total} remaining "
-        f"({movement_used} used) | Action: {action_status} | Turn: {current_turn}{defending}"
+        f"Movement: {movement_remaining}/{movement_total} remaining ({movement_used} used) | "
+        f"Mana: {mana}/{max_mana} | Action: {action_status} | Turn: {current_turn}{defending}"
     )
 
 
@@ -131,6 +134,32 @@ def _print_combat_results(results, combat=None) -> None:
                 )
                 if event.get("target_defeated"):
                     print(f"{target} is defeated.")
+        elif event_type in {"player_ability", "enemy_ability"}:
+            actor = event.get("actor", "Combatant")
+            ability = event.get("ability", "Ability")
+            target = event.get("target", "Target")
+            before = int(event.get("resource_before", 0) or 0)
+            after = int(event.get("resource_after", 0) or 0)
+            cost = int(event.get("resource_cost", 0) or 0)
+            print(f"\n✨ {actor} uses {ability} on {target}")
+            print(f"Mana: {before} → {after} (cost {cost}) | Range: {event.get('distance')}/{event.get('range')}")
+            if event.get("requires_attack_roll"):
+                bonus = int(event.get("attack_bonus", 0) or 0)
+                sign = "+" if bonus >= 0 else "-"
+                hit_text = "HIT" if event.get("hit") else "MISS"
+                print(f"d20: {event.get('d20')} {sign} {abs(bonus)} = {event.get('attack_total')} vs AC {event.get('armor_class')} — {hit_text}")
+            if event.get("hit") and event.get("damage_rolls"):
+                crit = " CRITICAL!" if event.get("critical") else ""
+                breakdown = _format_damage_breakdown(event, first_label="Ability")
+                print(
+                    f"Damage: {event.get('damage')} [{breakdown}] | {target} HP: "
+                    f"{event.get('target_hp')}/{event.get('target_max_hp')}{crit}"
+                )
+            cooldown = int(event.get("cooldown_turns", 0) or 0)
+            if cooldown:
+                print(f"Cooldown: {cooldown} turn(s)")
+            if event.get("target_defeated"):
+                print(f"{target} is defeated.")
         elif event_type in {"player_defend", "enemy_defend"}:
             bonus = int(event.get("defense_ac_bonus", 0) or 0)
             score = int(event.get("defense_score", 0) or 0)
