@@ -62,7 +62,8 @@ def _print_movement_hud(combat) -> None:
     current_turn = order[turn_index] if order and 0 <= turn_index < len(order) else "Unknown"
     round_number = int(combat.get("round", 1) or 1)
     action_status = "USED" if player.get("primary_action_used") else "READY"
-    defending = " | Defending: +2 AC" if player.get("defending") else ""
+    active_defense = int(player.get("active_defense_ac_bonus", 0) or 0)
+    defending = f" | Defending: +{active_defense} AC" if player.get("defending") else ""
 
     print("\n🏃 MOVEMENT HUD")
     print(
@@ -103,7 +104,9 @@ def _print_combat_results(results, combat=None) -> None:
                 if event.get("target_defeated"):
                     print(f"{target} is defeated.")
         elif event_type in {"player_defend", "enemy_defend"}:
-            print(f"\n🛡️ {event.get('actor', 'Combatant')} DEFENDS — +2 AC until next turn")
+            bonus = int(event.get("defense_ac_bonus", 0) or 0)
+            score = int(event.get("defense_score", 0) or 0)
+            print(f"\n🛡️ {event.get('actor', 'Combatant')} DEFENDS — Defense {score} grants +{bonus} AC until next turn")
         elif event_type == "player_end_turn":
             print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
         elif event_type == "enemy_pass":
