@@ -4,7 +4,7 @@ from typing import Dict
 
 from .context import ContextBuilder
 from .memory import CampaignMemory
-from .provider import DevelopmentProvider
+from .provider import provider_from_environment
 from .rules import RuleLibrary
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
@@ -20,7 +20,7 @@ class GameMaster:
         memory: CampaignMemory | None = None,
         rules: RuleLibrary | None = None,
     ) -> None:
-        self.provider = provider or DevelopmentProvider()
+        self.provider = provider or provider_from_environment()
         self.state = state or GameState()
         self.memory = memory or CampaignMemory()
         self.rules = rules or RuleLibrary()
