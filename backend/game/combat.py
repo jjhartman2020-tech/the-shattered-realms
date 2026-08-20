@@ -50,6 +50,12 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor["attribute_channels"] = channels
         actor.setdefault("hp", channels["max_health_base"])
         actor.setdefault("max_hp", channels["max_health_base"])
+        # Encounter enemy HP supplied by the Game Master is the enemy's full
+        # encounter health, not an already-wounded value. Keep the denominator
+        # locked to that starting HP so 17 HP stays 17/17 instead of becoming
+        # 17/20 because of the generic attribute-derived health calculation.
+        if actor.get("team") == "enemy" and "hp" in raw:
+            actor["max_hp"] = int(actor["hp"])
         actor.setdefault("mana", channels["max_mana_base"])
         actor.setdefault("max_mana", channels["max_mana_base"])
         actor.setdefault("armor_class", 10 + channels["defense_bonus"])
