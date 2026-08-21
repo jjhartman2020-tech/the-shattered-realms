@@ -24,15 +24,34 @@ def _print_suggested_actions(result) -> None:
     if not isinstance(result, dict):
         return
     suggestions = result.get("suggested_actions")
-    if not isinstance(suggestions, list):
+    if not isinstance(suggestions, list) or not suggestions:
         return
-    suggestions = [str(item).strip() for item in suggestions if str(item).strip()][:3]
-    if not suggestions:
-        return
+
     print("Possible actions:")
-    for index, suggestion in enumerate(suggestions, 1):
-        print(f"  {index}. {suggestion}")
-    print("  Or type any other action you want.")
+    shown = 0
+    for item in suggestions:
+        if shown >= 3:
+            break
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            requires_roll = bool(item.get("requires_roll", False))
+            skill = str(item.get("skill") or "").strip().replace("_", " ").title()
+            if requires_roll:
+                preview = f" [ROLL: {skill or 'Skill check'}]"
+            else:
+                preview = " [NO ROLL EXPECTED]"
+        else:
+            text = str(item).strip()
+            if not text:
+                continue
+            preview = ""
+        shown += 1
+        print(f"  {shown}. {text}{preview}")
+
+    if shown:
+        print("  Or type any other action you want.")
 
 
 def _print_combat_hud(combat) -> None:
@@ -91,6 +110,21 @@ def _print_combat_results(results, combat=None) -> None:
     _print_combat_hud(combat)
 
 
+def _format_check_sources(check) -> str:
+    if not isinstance(check, dict):
+        return ""
+    parts = []
+    attribute = str(check.get("attribute") or "").strip().replace("_", " ").title()
+    skill = str(check.get("skill") or "").strip().replace("_", " ").title()
+    attribute_bonus = int(check.get("attribute_bonus", 0) or 0)
+    skill_bonus = int(check.get("skill_bonus", 0) or 0)
+    if attribute:
+        parts.append(f"{attribute} {attribute_bonus:+d}")
+    if skill:
+        parts.append(f"{skill} {skill_bonus:+d}")
+    return ", ".join(parts)
+
+
 def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
     print("Type 'start game' to create a world, build a character, and begin a new adventure.")
@@ -131,9 +165,19 @@ def main() -> None:
         result = game_master.handle_action(action)
         check = result.get("roll")
         if isinstance(check, dict) and check.get("rolls"):
-            rolled = check["rolls"][0]; modifier = int(check.get("modifier", 0)); sign = "+" if modifier >= 0 else "-"
+            rolled = check["rolls"][0]
+            modifier = int(check.get("modifier", 0) or 0)
+            sign = "+" if modifier >= 0 else "-"
             outcome = str(check.get("outcome", "")).replace("_", " ").upper()
-            print(f"\n🎲 CHECK — {check.get('reason', 'Action')}\nd20: {rolled} {sign} {abs(modifier)} = {check.get('total')} vs DC {check.get('dc')}\nRESULT: {outcome}")
+            sources = _format_check_sources(check)
+            source_text = f" ({sources})" if sources else ""
+            skill = str(check.get("skill") or "").strip().replace("_", " ").title()
+            attribute = str(check.get("attribute") or "").strip().replace("_", " ").title()
+            check_label = skill or attribute or "General check"
+            print(f"\n🎲 CHECK — {check.get('reason', 'Action')}")
+            print(f"Using: {check_label}" + (f" ({attribute})" if skill and attribute else ""))
+            print(f"d20: {rolled} {sign} {abs(modifier)}{source_text} = {check.get('total')} vs DC {check.get('dc')}")
+            print(f"RESULT: {outcome}")
         _print_combat_results(result.get("combat_results"), result.get("combat"))
         after_player = game_master.state.snapshot().get("player", {})
         if int(after_player.get("level", 1) or 1) > before_level:
