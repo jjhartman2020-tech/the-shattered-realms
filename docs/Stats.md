@@ -1,6 +1,6 @@
 # Stats.md
 
-Version: 1.4
+Version: 1.5
 Status: In Development
 
 ---
@@ -164,6 +164,26 @@ Base tactical movement is 6 grid spaces.
 
 At 30 Speed, natural movement is 11 spaces before other effects.
 
+## Resource Capacity
+
+The **Mana attribute** is the universal resource-capacity attribute, even when a class gives its resource a different name.
+
+`Maximum Class Resource = floor(Mana / 2) x 10`
+
+Examples:
+
+- Mana 0-1 = 0 resource
+- Mana 2-3 = 10 resource
+- Mana 4-5 = 20 resource
+- Mana 6-7 = 30 resource
+- Mana 10-11 = 50 resource
+- Mana 20-21 = 100 resource
+- Mana 30 = 150 resource
+
+The resource is displayed using the character's class resource name. For example, Mana 10 means 50 Stamina for a Warrior, 50 Rage for a Barbarian, 50 Ki for a Monk, or 50 Mana for a Mage.
+
+No fractional resource capacity is granted for an incomplete 2-point threshold.
+
 ## Damage Scaling
 
 Strength-based physical attacks gain a whole-number damage bonus:
@@ -232,11 +252,23 @@ Health may also be referenced by survival challenges, endurance events, environm
 
 # 7. Mana
 
-Mana directly determines the character's base Maximum Mana.
+Mana is the universal **class-resource capacity attribute**.
 
-`Maximum Mana = Mana`
+It does not mean every class literally uses a resource called Mana. The class determines the pool's displayed name, while the Mana attribute determines the pool's maximum size.
 
-Abilities may consume Mana according to their own documented costs. Regeneration rules are defined separately.
+`Maximum Class Resource = floor(Mana / 2) x 10`
+
+Examples:
+
+- Mana 2 = 10 resource
+- Mana 4 = 20 resource
+- Mana 10 = 50 resource
+- Mana 20 = 100 resource
+- Mana 30 = 150 resource
+
+For a Mage this pool is called Mana. For other classes it may be Stamina, Energy, Divine Power, Focus, Ki, Rage, Shadow Energy, or another established custom-class resource.
+
+Abilities consume the character's class resource according to their documented costs. Regeneration and recovery rules are defined separately.
 
 ---
 
@@ -356,6 +388,7 @@ The AI Game Master may choose the relevant attribute, target difficulty, or cont
 
 - Raw base attributes cap at 30.
 - Core attribute modifiers cap naturally at +10.
+- Class-resource capacity caps naturally at 150 from a base Mana attribute of 30 before special effects.
 - Passive Defense pulls from several attributes at slower rates.
 - The Defense attribute's large AC scaling requires spending the character's primary action to activate it.
 - Combat difficulty should rely on tactics, positioning, resources, and enemy behavior rather than stat inflation alone.
