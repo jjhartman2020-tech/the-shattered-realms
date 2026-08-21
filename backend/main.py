@@ -65,20 +65,24 @@ def _print_combat_hud(combat) -> None:
         resource_name = str(player.get("resource_name") or "Resource")
         resource = int(player.get("resource", player.get("mana", 0)) or 0)
         max_resource = int(player.get("max_resource", player.get("max_mana", resource)) or resource)
+        shield = int(player.get("shield_hp", 0) or 0); max_shield = int(player.get("max_shield_hp", 0) or 0)
         armor = int(player.get("armor", 0) or 0); max_armor = int(player.get("max_armor", 0) or 0)
         hp = int(player.get("hp", 0) or 0); max_hp = int(player.get("max_hp", hp) or hp)
         action = "USED" if player.get("primary_action_used") else "READY"
         order = combat.get("order") or []; index = int(combat.get("turn_index", 0) or 0)
         turn = order[index] if order and 0 <= index < len(order) else "Unknown"
         defending = f" | Defending +{int(player.get('active_defense_ac_bonus', 0) or 0)} AC" if player.get("defending") else ""
+        shield_text = f" | Shield: {shield}/{max_shield}" if max_shield > 0 else ""
         print("\n🏃 MOVEMENT HUD")
-        print(f"Round {combat.get('round', 1)} | Position: ({x}, {y}) | Movement: {max(0, movement-used)}/{movement} | HP: {hp}/{max_hp} | Armor: {armor}/{max_armor} | {resource_name}: {resource}/{max_resource} | Action: {action} | Turn: {turn}{defending}")
+        print(f"Round {combat.get('round', 1)} | Position: ({x}, {y}) | Movement: {max(0, movement-used)}/{movement} | HP: {hp}/{max_hp}{shield_text} | Armor: {armor}/{max_armor} | {resource_name}: {resource}/{max_resource} | Action: {action} | Turn: {turn}{defending}")
     enemies = [a for a in combatants if isinstance(a, dict) and a.get("team") == "enemy"]
     if enemies:
         entries = []
         for enemy in enemies:
             x, y = _position_xy(enemy)
             status = "DEFEATED" if enemy.get("defeated") else f"{int(enemy.get('hp', 0))}/{int(enemy.get('max_hp', enemy.get('hp', 0)))} HP"
+            if int(enemy.get("max_shield_hp", 0) or 0) > 0:
+                status += f", {int(enemy.get('shield_hp', 0) or 0)}/{int(enemy.get('max_shield_hp', 0) or 0)} Shield"
             if int(enemy.get("max_armor", 0) or 0) > 0:
                 status += f", {int(enemy.get('armor', 0) or 0)}/{int(enemy.get('max_armor', 0) or 0)} Armor"
             entries.append(f"{enemy.get('name', 'Enemy')}: {status} @ ({x}, {y})")
@@ -88,11 +92,18 @@ def _print_combat_hud(combat) -> None:
 def _print_damage_result(event: dict) -> None:
     crit = " CRITICAL!" if event.get("critical") else ""
     damage = int(event.get("damage", 0) or 0)
+    shield_absorbed = int(event.get("shield_absorbed", 0) or 0)
     armor_absorbed = int(event.get("armor_absorbed", 0) or 0)
     hp_damage = int(event.get("hp_damage", damage) or 0)
-    if "armor_after" in event:
-        print(f"Damage: {damage} | Armor absorbed: {armor_absorbed} | HP damage: {hp_damage}{crit}")
-        print(f"Target Armor: {int(event.get('armor_after', 0) or 0)}/{int(event.get('target_max_armor', 0) or 0)} | HP: {event.get('target_hp')}/{event.get('target_max_hp')}")
+    if "shield_after" in event or "armor_after" in event:
+        print(f"Damage: {damage} | Shield absorbed: {shield_absorbed} | Armor absorbed: {armor_absorbed} | HP damage: {hp_damage}{crit}")
+        status_parts = []
+        if "shield_after" in event:
+            status_parts.append(f"Shield: {int(event.get('shield_after', 0) or 0)}/{int(event.get('target_max_shield', 0) or 0)}")
+        if "armor_after" in event:
+            status_parts.append(f"Armor: {int(event.get('armor_after', 0) or 0)}/{int(event.get('target_max_armor', 0) or 0)}")
+        status_parts.append(f"HP: {event.get('target_hp')}/{event.get('target_max_hp')}")
+        print(" | ".join(status_parts))
         broken = event.get("broken_armor_pieces") or []
         if broken: print("BROKEN ARMOR: " + ", ".join(str(x) for x in broken))
     else:
@@ -169,7 +180,8 @@ def main() -> None:
             player = created["player"]
             print("\n" + "=" * 48); print(f"{player.get('name')} — {player.get('class')}")
             print(f"World: {world.get('name', 'Custom World')}")
-            print(f"HP: {player.get('hp')}/{player.get('max_hp')} | Armor: {player.get('armor',0)}/{player.get('max_armor',0)} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
+            shield_text = f" | Shield: {player.get('shield_hp',0)}/{player.get('max_shield_hp',0)}" if int(player.get('max_shield_hp',0) or 0) > 0 else ""
+            print(f"HP: {player.get('hp')}/{player.get('max_hp')}{shield_text} | Armor: {player.get('armor',0)}/{player.get('max_armor',0)} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
             _print_progress(player)
             print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
             print("=" * 48); print("\n" + created.get("narration", "Your adventure begins.") + "\n")
