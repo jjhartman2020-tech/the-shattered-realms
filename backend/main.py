@@ -10,6 +10,7 @@ from backend.game.armor_runtime import (
     install_armor_runtime,
     show_player_armor,
 )
+from backend.game.inventory import show_inventory, show_equipment, run_equipment_screen
 from backend.game.attributes import SKILL_ATTRIBUTE
 
 
@@ -28,8 +29,7 @@ def _print_progress(player) -> None:
 
 def _preview_stat(item: dict) -> str:
     raw = str(item.get("stat") or item.get("attribute") or item.get("skill") or "").strip().lower().replace(" ", "_")
-    if raw in SKILL_ATTRIBUTE:
-        raw = SKILL_ATTRIBUTE[raw]
+    if raw in SKILL_ATTRIBUTE: raw = SKILL_ATTRIBUTE[raw]
     allowed = {"health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"}
     return raw.title() if raw in allowed else "Core Stat"
 
@@ -81,10 +81,8 @@ def _print_combat_hud(combat) -> None:
         for enemy in enemies:
             x, y = _position_xy(enemy)
             status = "DEFEATED" if enemy.get("defeated") else f"{int(enemy.get('hp', 0))}/{int(enemy.get('max_hp', enemy.get('hp', 0)))} HP"
-            if int(enemy.get("max_shield_hp", 0) or 0) > 0:
-                status += f", {int(enemy.get('shield_hp', 0) or 0)}/{int(enemy.get('max_shield_hp', 0) or 0)} Shield"
-            if int(enemy.get("max_armor", 0) or 0) > 0:
-                status += f", {int(enemy.get('armor', 0) or 0)}/{int(enemy.get('max_armor', 0) or 0)} Armor"
+            if int(enemy.get("max_shield_hp", 0) or 0) > 0: status += f", {int(enemy.get('shield_hp', 0) or 0)}/{int(enemy.get('max_shield_hp', 0) or 0)} Shield"
+            if int(enemy.get("max_armor", 0) or 0) > 0: status += f", {int(enemy.get('armor', 0) or 0)}/{int(enemy.get('max_armor', 0) or 0)} Armor"
             entries.append(f"{enemy.get('name', 'Enemy')}: {status} @ ({x}, {y})")
         print("🎯 TARGETS"); print(" | ".join(entries))
 
@@ -98,10 +96,8 @@ def _print_damage_result(event: dict) -> None:
     if "shield_after" in event or "armor_after" in event:
         print(f"Damage: {damage} | Shield absorbed: {shield_absorbed} | Armor absorbed: {armor_absorbed} | HP damage: {hp_damage}{crit}")
         status_parts = []
-        if "shield_after" in event:
-            status_parts.append(f"Shield: {int(event.get('shield_after', 0) or 0)}/{int(event.get('target_max_shield', 0) or 0)}")
-        if "armor_after" in event:
-            status_parts.append(f"Armor: {int(event.get('armor_after', 0) or 0)}/{int(event.get('target_max_armor', 0) or 0)}")
+        if "shield_after" in event: status_parts.append(f"Shield: {int(event.get('shield_after', 0) or 0)}/{int(event.get('target_max_shield', 0) or 0)}")
+        if "armor_after" in event: status_parts.append(f"Armor: {int(event.get('armor_after', 0) or 0)}/{int(event.get('target_max_armor', 0) or 0)}")
         status_parts.append(f"HP: {event.get('target_hp')}/{event.get('target_max_hp')}")
         print(" | ".join(status_parts))
         broken = event.get("broken_armor_pieces") or []
@@ -152,6 +148,7 @@ def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
     print("Type 'start game' to create a world, build a character, and begin a new adventure.")
     print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
+    print("Type 'inventory' to view everything you carry. Type 'equipment' to view equipped gear. Type 'equip' to swap gear.")
     print("Type 'armor' to view your five armor slots and Armor HP.")
     print("Type 'spend sp' to upgrade stats. Type 'spend ap' to learn abilities. Type 'quit' to stop.\n")
     game_master = GameMaster()
@@ -163,6 +160,12 @@ def main() -> None:
             print("Campaign paused."); break
         if lowered == "progress":
             _print_progress(game_master.state.snapshot().get("player", {})); continue
+        if lowered in {"inventory", "inv", "bag", "items"}:
+            show_inventory(game_master); continue
+        if lowered in {"equipment", "gear", "loadout", "show equipment"}:
+            show_equipment(game_master.state.data.get("player", {})); continue
+        if lowered in {"equip", "change equipment", "swap gear", "swap equipment"}:
+            run_equipment_screen(game_master); continue
         if lowered in {"armor", "show armor", "armor status"}:
             show_player_armor(game_master); continue
         if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
