@@ -35,35 +35,48 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
             "threads of a much larger conflict are beginning to gather."
         ),
         "abilities": [
-            {"name": "Committed Strike", "description": "A forceful single-target attack.", "resource_cost": 10, "target": "enemy", "range": 1, "attack_attribute": "strength", "damage": "1d8"},
-            {"name": "Quickstep", "description": "A burst of controlled movement.", "resource_cost": 5, "target": "self", "range": 0},
-            {"name": "Focused Shot", "description": "A precise ranged attack.", "resource_cost": 10, "target": "enemy", "range": 6, "attack_attribute": "dexterity", "damage": "1d6"},
-            {"name": "Arc Spark", "description": "A basic magical attack.", "resource_cost": 10, "target": "enemy", "range": 5, "attack_attribute": "magic", "damage": "1d6"},
-            {"name": "Brace", "description": "Reinforce yourself against an incoming threat.", "resource_cost": 5, "target": "self", "range": 0},
-            {"name": "Second Wind", "description": "A small restorative surge.", "resource_cost": 15, "target": "self", "range": 0},
+            {"name": "Committed Strike", "description": "A forceful single-target attack.", "resource_cost": 10, "target": "enemy", "range": 1, "attack_attribute": "strength", "damage": "1d6"},
+            {"name": "Quickstep", "description": "A short burst of controlled movement.", "resource_cost": 5, "target": "self", "range": 0, "movement_squares": 2},
+            {"name": "Focused Shot", "description": "A precise ranged attack.", "resource_cost": 10, "target": "enemy", "range": 5, "attack_attribute": "dexterity", "damage": "1d6"},
+            {"name": "Arc Spark", "description": "A small magical projectile.", "resource_cost": 10, "target": "enemy", "range": 4, "attack_attribute": "magic", "damage": "1d6"},
+            {"name": "Brace", "description": "Reinforce yourself against an incoming threat.", "resource_cost": 5, "target": "self", "range": 0, "shield": 4},
+            {"name": "Second Wind", "description": "A small restorative surge.", "resource_cost": 15, "target": "self", "range": 0, "healing": "1d6"},
         ],
         "starter_kits": [
-            {"name": "Vanguard Kit", "items": ["Iron Sword", "Leather Coat", "Healing Draught"]},
-            {"name": "Scout Kit", "items": ["Shortbow", "Travel Cloak", "Rope"]},
-            {"name": "Mystic Kit", "items": ["Focus Rod", "Padded Robes", "Restorative Tonic"]},
+            {"name": "Vanguard Kit", "items": [
+                {"name": "Worn Iron Sword", "type": "weapon", "description": "A plain starter sword.", "damage": "1d6", "resource_cost": 0, "range": 1, "attack_attribute": "strength"},
+                {"name": "Leather Coat", "type": "armor", "description": "Simple light protection.", "armor_bonus": 1},
+                {"name": "Healing Draught", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
+            ]},
+            {"name": "Scout Kit", "items": [
+                {"name": "Simple Shortbow", "type": "weapon", "description": "A modest starter bow.", "damage": "1d4", "resource_cost": 0, "range": 5, "attack_attribute": "dexterity"},
+                {"name": "Travel Cloak", "type": "armor", "description": "Light protection for the road.", "armor_bonus": 1},
+                {"name": "Rope", "type": "utility", "description": "Useful for climbing and traversal."},
+            ]},
+            {"name": "Mystic Kit", "items": [
+                {"name": "Cracked Focus Rod", "type": "weapon", "description": "A weak magical focus.", "damage": "1d4", "resource_cost": 5, "range": 4, "attack_attribute": "magic"},
+                {"name": "Padded Robes", "type": "armor", "description": "Basic protective robes.", "armor_bonus": 1},
+                {"name": "Restorative Tonic", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
+            ]},
         ],
         "special_equipment": [
-            {"name": "Balanced Blade", "description": "A reliable starter weapon."},
-            {"name": "Hunter's Bow", "description": "A light ranged weapon."},
-            {"name": "Runed Focus", "description": "A simple focus for magical effects."},
-            {"name": "Reinforced Buckler", "description": "A compact defensive tool."},
-            {"name": "Traveler's Charm", "description": "A small class-themed keepsake."},
-            {"name": "Utility Satchel", "description": "Tools for exploration and improvisation."},
+            {"name": "Balanced Knife", "type": "weapon", "description": "A quick but weak backup blade.", "damage": "1d4", "resource_cost": 0, "range": 1, "attack_attribute": "dexterity"},
+            {"name": "Hunter's Sling", "type": "weapon", "description": "A simple ranged backup weapon.", "damage": "1d4", "resource_cost": 0, "range": 4, "attack_attribute": "dexterity"},
+            {"name": "Faded Runestone", "type": "focus", "description": "A minor magical focus.", "effect": "+1 to one Magic-based check when specifically invoked by a valid effect."},
+            {"name": "Reinforced Buckler", "type": "shield", "description": "A compact defensive tool.", "armor_bonus": 1},
+            {"name": "Traveler's Charm", "type": "accessory", "description": "A small class-themed keepsake.", "effect": "No combat bonus; story utility only."},
+            {"name": "Utility Satchel", "type": "utility", "description": "Tools for exploration and improvisation.", "effect": "Contains basic rope, chalk, flint, and simple hand tools."},
         ],
     }
 
 
 def _normalize_starter_ability_costs(abilities: List[Dict], max_resource: int) -> List[Dict]:
-    """Force generated starter costs into the game's real resource-point scale.
+    """Normalize starter ability costs to the real resource-point scale.
 
-    The model sometimes returns tabletop-style costs such as 1 or 2. Shattered
-    Realms resources use actual point pools (10, 20, 50, etc.), so beginner
-    abilities use multiples of 5 and must be affordable by the confirmed build.
+    Starter abilities are intentionally low-tier and should normally be usable by
+    the new character. The wider game may still contain abilities whose resource
+    costs exceed the player's current or maximum resource; those may be unlocked
+    and equipped but cannot be activated until the requirement can actually be paid.
     """
     normalized: List[Dict] = []
     for raw in abilities:
@@ -72,17 +85,48 @@ def _normalize_starter_ability_costs(abilities: List[Dict], max_resource: int) -
         if max_resource <= 0:
             cost = 0
         else:
-            # Treat accidental 1/2/3 style costs as 5/10/15 resource points.
             if 1 <= raw_cost <= 3:
                 raw_cost *= 5
             if raw_cost <= 0:
                 raw_cost = 5
-            # Starter costs live on 5-point increments and cannot exceed the pool.
             cost = max(5, int(round(raw_cost / 5.0)) * 5)
+            # Character-creation abilities are beginner-tier, so keep them usable.
             cost = min(cost, max_resource)
         ability["resource_cost"] = cost
         normalized.append(ability)
     return normalized
+
+
+def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
+    """Return exact mechanical information for an ability or item."""
+    parts: List[str] = []
+    damage = entry.get("damage")
+    healing = entry.get("healing")
+    shield = entry.get("shield")
+    movement = entry.get("movement_squares")
+    armor = entry.get("armor_bonus")
+    range_value = entry.get("range")
+    resource_cost = entry.get("resource_cost")
+    effect = entry.get("effect")
+
+    if damage not in {None, "", "0", 0}:
+        parts.append(f"Damage {damage}")
+    if healing not in {None, "", "0", 0}:
+        parts.append(f"Healing {healing}")
+    if shield not in {None, "", "0", 0}:
+        parts.append(f"Shield {shield}")
+    if movement not in {None, "", "0", 0}:
+        parts.append(f"Move {movement} squares")
+    if armor not in {None, "", "0", 0}:
+        parts.append(f"Armor +{armor}")
+    if range_value is not None and entry.get("type") in {"weapon", "active", None}:
+        parts.append(f"Range {range_value}")
+    if resource_cost is not None:
+        label = resource_name or "Resource"
+        parts.append(f"Cost {int(resource_cost or 0)} {label}")
+    if effect:
+        parts.append(str(effect))
+    return " | ".join(parts) if parts else "No numeric combat effect"
 
 
 def generate_character_package(provider, *, name: str, appearance: str, stats: Dict[str, int]) -> Dict:
@@ -101,12 +145,16 @@ Return ONLY valid JSON. Do not include markdown.
 Use the player's exact name and appearance as fixed canon. Do not rewrite or contradict them.
 Use the confirmed 13-stat build to inspire, but not mechanically alter, the character.
 Generate a unique beginner-friendly class, a thematic class-resource name, and a backstory.
-Generate exactly 6 beginner abilities. They must be meaningfully different and suitable for the generated class.
-Each ability needs name, description, resource_cost, target, range, and may include attack_attribute and damage.
-RESOURCE COSTS ARE REAL RESOURCE POINTS, NOT 1/2/3 tabletop slots. Costs must be multiples of 5. Beginner abilities should normally cost 5, 10, or 15 resource points and should be affordable with the character's confirmed maximum resource. Do not output costs of 1, 2, or 3.
+
+Generate exactly 6 BEGINNER abilities. Starter abilities must be intentionally weaker than mid/late-game abilities. Stronger abilities later in progression should have stronger effects and usually higher resource costs.
+Every ability must state exact mechanics, not vague prose. Include name, description, resource_cost, target, range, and the exact effect fields that apply. Offensive abilities need damage such as 1d4, 1d6, or another explicit expression. Movement abilities need movement_squares. Healing abilities need healing. Shield abilities need shield. Buff/debuff/utility abilities need an explicit effect string with exact values/duration when relevant.
+RESOURCE COSTS ARE REAL RESOURCE POINTS. Costs use multiples of 5. Beginner abilities normally cost 5, 10, or 15 resource and should be affordable by this starting character. Do not output 1/2/3 slot-style costs.
 attack_attribute may be strength, dexterity, or magic when an attack roll is appropriate.
-Generate exactly 3 starter kits, each with a name and 3-4 ordinary starter items.
-Generate exactly 6 special starter equipment choices, each with name and description.
+
+Generate exactly 3 starter kits, each with a name and 3-4 structured item objects. Starter weapons must be deliberately weak early-game weapons. Every weapon item MUST contain type='weapon', description, damage, resource_cost, range, and attack_attribute. Weapon attacks may cost 0 or a small amount of class resource at the beginning. Stronger weapons acquired later should generally deal more damage or have stronger effects and may cost more resource per attack.
+Non-weapon items must also state their exact mechanical effect when they have one, such as armor_bonus, healing, movement_squares, or effect.
+
+Generate exactly 6 special starter equipment choices as structured item objects with name, type, description, and exact mechanical fields whenever applicable.
 Do not give permanent stat increases in starter equipment.
 Top-level JSON keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
     payload = {
@@ -167,7 +215,7 @@ def _allocate_attributes() -> Dict[str, int]:
     allocation: Dict[str, int] = {}
     print(f"\nYou have {STARTING_ATTRIBUTE_POINTS} AP to spend across {len(ATTRIBUTE_NAMES)} stats.")
     print("Each stat has a natural cap of 100. You must spend all starting AP before confirming.\n")
-    for index, stat in enumerate(ATTRIBUTE_NAMES):
+    for stat in ATTRIBUTE_NAMES:
         while True:
             raw = input(f"{stat.title()} (remaining AP: {remaining}): ").strip()
             try:
@@ -200,7 +248,6 @@ def _allocate_attributes() -> Dict[str, int]:
 
 
 def _print_derived_sheet(sheet: Dict, resource_name: str = "Resource") -> None:
-    """Show the important values produced by the confirmed attributes."""
     print("\nDERIVED CHARACTER STATS")
     print(f"  Max HP:                  {int(sheet['max_health_base'])}")
     print(f"  Max {resource_name}:".ljust(28) + f"{int(sheet['max_resource_base'])}")
@@ -213,8 +260,17 @@ def _print_derived_sheet(sheet: Dict, resource_name: str = "Resource") -> None:
     print(f"  Defend Action AC Bonus:  +{int(sheet['defend_action_ac_bonus'])}")
 
 
+def _print_item(item: Dict, resource_name: str) -> str:
+    if not isinstance(item, dict):
+        return str(item)
+    name = str(item.get("name") or "Item")
+    description = str(item.get("description") or "").strip()
+    mechanics = _effect_text(item, resource_name)
+    suffix = f" — {description}" if description else ""
+    return f"{name}{suffix} [{mechanics}]"
+
+
 def run_character_creation(game_master) -> Dict:
-    """Run the current CLI character creator and persist the finished character."""
     print("\n" + "=" * 48)
     print("START NEW ADVENTURE — CHARACTER CREATION")
     print("=" * 48)
@@ -245,23 +301,28 @@ def run_character_creation(game_master) -> Dict:
     abilities = package["abilities"]
     print(f"\nBEGINNER ABILITIES — choose 2 (Max {resource_name}: {int(sheet['max_resource_base'])})")
     for i, ability in enumerate(abilities, 1):
-        print(f"{i}. {ability.get('name')} — {ability.get('description')} (Cost {ability.get('resource_cost', 0)} {resource_name})")
+        print(f"{i}. {ability.get('name')} — {ability.get('description')} [{_effect_text(ability, resource_name)}]")
     chosen_abilities = _choose_many(abilities, 2, "Choose 2 ability numbers (example 1,4): ")
 
     kits = package["starter_kits"]
     print("\nSTARTER KITS — choose 1")
     for i, kit in enumerate(kits, 1):
-        print(f"{i}. {kit.get('name')} — {', '.join(str(x) for x in kit.get('items', []))}")
+        item_text = "; ".join(_print_item(item, resource_name) for item in kit.get("items", []))
+        print(f"{i}. {kit.get('name')} — {item_text}")
     chosen_kit = _choose_one(kits, "Choose a kit: ")
 
     equipment = package["special_equipment"]
     print("\nSPECIAL STARTER EQUIPMENT — choose 2")
     for i, item in enumerate(equipment, 1):
-        print(f"{i}. {item.get('name')} — {item.get('description')}")
+        print(f"{i}. {_print_item(item, resource_name)}")
     chosen_equipment = _choose_many(equipment, 2, "Choose 2 equipment numbers: ")
 
     sheet = character_sheet_channels(stats, level=1)
     player = game_master.state.data.setdefault("player", {})
+    kit_items = deepcopy(chosen_kit.get("items", []))
+    all_items = kit_items + deepcopy(chosen_equipment)
+    starter_weapon = next((item for item in all_items if isinstance(item, dict) and item.get("type") == "weapon"), None)
+
     player.update({
         "name": name,
         "appearance": appearance,
@@ -289,8 +350,10 @@ def run_character_creation(game_master) -> Dict:
         "unlocked_abilities": deepcopy(chosen_abilities),
         "equipped_abilities": deepcopy(chosen_abilities),
         "starter_kit": deepcopy(chosen_kit),
-        "inventory": deepcopy(chosen_kit.get("items", [])) + deepcopy(chosen_equipment),
+        "inventory": all_items,
         "special_starting_equipment": deepcopy(chosen_equipment),
+        "equipped_weapon": deepcopy(starter_weapon),
+        "damage": str(starter_weapon.get("damage", "1d4")) if starter_weapon else "1d4",
         "character_creation_complete": True,
     })
     game_master.state.data["combat"] = {"active": False}
@@ -303,9 +366,15 @@ def run_character_creation(game_master) -> Dict:
     print("\nFINAL CHARACTER SUMMARY")
     print(f"  {name} — {player['class']}")
     _print_derived_sheet(sheet, resource_name)
-    print("  Chosen Abilities:        " + ", ".join(str(a.get("name")) for a in chosen_abilities))
+    print("  Chosen Abilities:")
+    for ability in chosen_abilities:
+        print(f"    - {ability.get('name')}: {_effect_text(ability, resource_name)}")
     print("  Starter Kit:             " + str(chosen_kit.get("name")))
-    print("  Special Equipment:       " + ", ".join(str(i.get("name")) for i in chosen_equipment))
+    if starter_weapon:
+        print("  Starting Weapon:         " + _print_item(starter_weapon, resource_name))
+    print("  Special Equipment:")
+    for item in chosen_equipment:
+        print("    - " + _print_item(item, resource_name))
 
     opening_context = {
         "player_action": "Begin the adventure with an opening scene for this newly completed character.",
