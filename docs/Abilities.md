@@ -1,13 +1,13 @@
 # Abilities.md
 
-Version: 1.3
+Version: 1.4
 Status: In Development
 
 ---
 
 # 1. Ability Philosophy
 
-Abilities should feel distinct, useful, and worth planning around. The player must always be able to see what an ability mechanically does before choosing, unlocking, equipping, purchasing, or using it.
+Abilities should feel distinct, useful, and worth planning around. The player must always be able to see what an ability mechanically does before choosing, learning, or using it.
 
 Power is balanced through Ability Point cost, Resource cost, action economy, positioning, targeting, requirements, and explicit restrictions rather than a universal cooldown system.
 
@@ -15,29 +15,31 @@ Power is balanced through Ability Point cost, Resource cost, action economy, pos
 
 # 2. Ability Points (AP)
 
-**Ability Points (AP)** are used only to permanently unlock abilities.
+**Ability Points (AP)** are used only to learn abilities.
 
 AP is separate from **Skill Points (SP)**, which improve core stats.
 
 AP earned from leveling scales upward at higher character levels as defined in `docs/progression/Leveling.md`.
 
-Unused AP may be saved indefinitely.
+**Unused AP may be saved indefinitely. Leveling never forces the player to spend AP.**
 
 ---
 
-# 3. Ability Tiers
+# 3. Ability Tiers and Level Gates
 
-Every unlockable ability belongs to one progression tier.
+Every learnable ability belongs to one progression tier.
 
-| Tier | Ability Point Cost |
-|---|---:|
-| Beginner | 1 AP |
-| Novice | 3 AP |
-| Expert | 6 AP |
-| Master | 10 AP |
-| Legendary | 15 AP |
+| Tier | AP Cost | First Available Level |
+|---|---:|---:|
+| Beginner | 1 AP | 1 |
+| Novice | 3 AP | 3 |
+| Expert | 6 AP | 10 |
+| Master | 10 AP | 25 |
+| Legendary | 15 AP | 50 |
 
-The AP cost is fixed by tier. The AI may not randomly change the cost of an ability after its tier is established.
+The AP cost is fixed by tier. The AI may not randomly change it.
+
+A player cannot learn a tier before its level gate even if they have enough saved AP. Once a tier is unlocked, the player may continue learning abilities from that tier or any lower unlocked tier.
 
 Tier represents overall mechanical strength, not only damage. Healing, movement, shielding, crowd control, number of targets, area size, range, duration, summoning, utility, and combinations of effects all contribute to tier.
 
@@ -45,12 +47,7 @@ Tier represents overall mechanical strength, not only damage. Healing, movement,
 
 # 4. Ability Types
 
-Abilities may be:
-
-- Active
-- Passive
-- Ultimate
-- Utility
+Abilities may be Active, Passive, Ultimate, or Utility. The current four-slot learning system applies to the character's normal active ability loadout.
 
 Using an active ability normally consumes the primary action unless the ability explicitly says otherwise.
 
@@ -58,17 +55,21 @@ Normal active abilities do **not** use universal cooldowns.
 
 ---
 
-# 5. Ability Slots
+# 5. Four Ability Slots and Forgetting
 
-Default slots:
+A character may know at most **4 normal active abilities at one time**.
 
-- 4 Active Ability Slots
-- Unlimited Passive Abilities unless another rule limits them
-- 1 Ultimate Ability Slot
+If the character has fewer than four abilities, learning a new ability fills an empty slot.
 
-Players may freely change equipped abilities outside combat.
+If all four slots are full, learning a new ability requires the player to choose one current ability to **permanently forget**, similar to learning a new move in Pokémon.
 
-A character may unlock and equip an ability even if they cannot currently afford its Resource Cost. The ability remains in the slot but cannot be activated until the full cost can be paid.
+The forgotten ability is removed from the active known-ability list. It is not automatically stored in a reserve collection for free swapping later.
+
+The game must show the four current abilities and require explicit confirmation before permanently replacing one.
+
+Ability replacement cannot be performed during combat.
+
+A character may learn and keep an ability whose Resource Cost is higher than their current maximum Resource. It occupies one of the four slots but cannot be activated until the full cost can actually be paid.
 
 ---
 
@@ -90,19 +91,9 @@ Stronger abilities generally have higher Resource Costs than weaker abilities fi
 
 # 7. Ability Progression
 
-Beginner abilities are intentionally modest. As the campaign progresses, stronger tiers become available.
+Beginner abilities are intentionally modest. As the campaign progresses, higher tiers become available through the fixed level gates in Section 3.
 
-Higher-tier abilities may:
-
-- Deal more damage
-- Heal more
-- Move farther
-- Shield more damage
-- Affect more targets
-- Cover larger areas
-- Have longer range or duration
-- Apply stronger conditions
-- Combine multiple useful effects
+Higher-tier abilities may deal more damage, heal more, move farther, shield more damage, affect more targets, cover larger areas, have longer range or duration, apply stronger conditions, or combine multiple useful effects.
 
 AP Cost and Resource Cost are separate progression gates. Unlocking a 15 AP Legendary ability does not guarantee the player has enough Resource to activate it.
 
@@ -126,38 +117,23 @@ If an ability damages, heals, shields, moves, buffs, debuffs, creates an area, a
 
 # 9. Ability Requirements
 
-Abilities may also require:
-
-- Class or generated-class compatibility
-- Minimum attributes
-- Specific equipment
-- Story unlocks
-- Other explicit conditions
+Abilities may also require class/generated-class compatibility, minimum attributes, specific equipment, story unlocks, or other explicit conditions.
 
 Attribute requirements use the current 0-100 stat system.
 
-Resource capacity is **not** an equip requirement unless an individual ability explicitly says so.
+Resource capacity is **not** a learning requirement unless an individual ability explicitly says so.
 
 ---
 
 # 10. AI-Generated Abilities
 
+When the player opens the ability-learning screen, the AI may generate class-specific ability choices using the character's class, backstory, stats, current level, Resource name, and current four abilities.
+
+The AI may generate only tiers currently unlocked by character level and must not repeat abilities the character already knows.
+
 AI-generated abilities follow the same tier, AP, Resource, and display rules as handcrafted abilities.
 
-The AI must determine and store:
-
-- Name
-- Description
-- Tier
-- Ability Point Cost derived from tier
-- Resource Cost
-- Type/category
-- Targeting
-- Range
-- Exact mechanical effects
-- Scaling attribute(s)
-- Attribute or story requirements if applicable
-- Explicit special restrictions if genuinely needed
+The AI must determine and store the name, description, tier, Resource Cost, type/category, targeting, range, exact mechanical effects, scaling attributes, requirements, and any explicit special restrictions. AP Cost is derived from tier by Python.
 
 The AI may not use vague wording in place of mechanical values.
 
@@ -175,15 +151,7 @@ An ability may scale from character attributes, equipment, status effects, envir
 
 There is no universal cooldown system.
 
-Rare abilities may define special restrictions such as:
-
-- Once per encounter
-- Once per rest
-- Once per day
-- Limited charges
-- Required setup condition
-
-Any such restriction must be visible to the player.
+Rare abilities may define explicit special restrictions such as once per encounter, once per rest, once per day, limited charges, or a required setup condition. Any such restriction must be visible to the player.
 
 ---
 
