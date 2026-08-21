@@ -3,6 +3,7 @@ from copy import deepcopy
 import json
 from typing import Dict, List
 
+from .dice import normalize_damage_expression
 from .progression import ABILITY_TIER_COSTS
 
 MAX_ABILITY_SLOTS = 4
@@ -85,6 +86,10 @@ def _normalize_generated(raw: List[Dict], level: int) -> List[Dict]:
         ability["resource_cost"] = max(5, int(round(max(5, int(ability.get("resource_cost", default_cost) or default_cost)) / 5.0)) * 5)
         ability.setdefault("target", "enemy")
         ability.setdefault("range", 1)
+        if ability.get("damage") not in (None, "", 0, "0"):
+            ability["damage"] = normalize_damage_expression(ability.get("damage"), "1d4")
+        if ability.get("healing") not in (None, "", 0, "0"):
+            ability["healing"] = normalize_damage_expression(ability.get("healing"), "1d4")
         result.append(ability)
     return result[:6]
 
@@ -99,6 +104,7 @@ Use the supplied custom class, backstory, stats, level, resource name, and curre
 Only use tiers listed in unlocked_tiers. Tier AP costs are fixed: Beginner=1, Novice=3, Expert=6, Master=10, Legendary=15.
 Power must meaningfully rise by tier. Stronger abilities should generally have higher Resource costs and stronger exact effects.
 EVERY ability must expose its exact gameplay numbers. If it deals damage include `damage`; if it heals include `healing`; if it shields include `shield`; if it moves the user/target include `movement_squares`; if it lasts include `duration`; if it affects multiple targets include `target_count`; if it has an area include `area`; if it modifies a stat include the exact numeric modifier. Never hide these values only inside description/effect prose.
+Damage and healing MUST use dice notation such as 1d4, 1d6, 1d8, 2d6, 2d8, or 3d6. Never output a fixed damage number like 4, 6, or 10.
 Every ability must also include: name, description, type='active', category, tier, resource_cost, target, range, requires_attack_roll.
 Resource costs must be positive multiples of 5. An ability may cost more Resource than the player's current maximum; that is allowed. The player can learn/equip it but cannot use it until they can pay the full Resource cost.
 Do not use cooldowns. Do not create basic weapon attacks; these are abilities."""
@@ -153,6 +159,8 @@ def _effect_text(ability: Dict, resource_name: str) -> str:
     for key, label, suffix in fields:
         value = ability.get(key)
         if value not in (None, "", 0, "0"):
+            if key in {"damage", "healing"}:
+                value = normalize_damage_expression(value, "1d4")
             text = str(value)
             if key == "duration" and any(word in text.lower() for word in ("round", "turn", "second", "minute")):
                 suffix = ""
