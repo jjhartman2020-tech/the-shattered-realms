@@ -58,6 +58,16 @@ CURRENT CORE RULES
 CHECK RULES
 - Ordinary uncontested actions do not need rolls. Risky, contested, uncertain non-combat actions whose success matters require a check.
 - On the first pass, if a check is needed, set requires_roll=true and choose the most appropriate skill and difficulty from trivial, easy, standard, hard, very_hard, extreme. Never invent the die result.
+- Use the whole difficulty range. Do NOT default to Hard just because an action involves danger, stealth, security, combat-adjacent pressure, or meaningful consequences.
+- Difficulty means how technically difficult the attempted task itself is in the current circumstances, not how dramatic the scene is.
+- Trivial (DC 5): nearly automatic but still uncertain under pressure.
+- Easy (DC 8): favorable or simple challenge; skilled characters should usually succeed.
+- Standard (DC 12): the normal default for a meaningful uncertain action. Most routine adventuring checks should land here.
+- Hard (DC 16): clearly difficult, opposed by strong defenses, bad conditions, or requiring advanced execution. Use substantially less often than Standard.
+- Very Hard (DC 20): exceptional feat, elite opposition, or severe disadvantage. This should be uncommon.
+- Extreme (DC 25): near-impossible without exceptional stats, preparation, powers, or luck. This should be rare.
+- If the player has a strong plan, good tools, surprise, leverage, relevant information, help, or a favorable position, lower the difficulty rather than keeping it artificially high.
+- If failure would be interesting but the action itself is not difficult, keep the DC Easy or Standard and let consequences provide the tension.
 - When context contains mechanical_result, obey Python's result exactly.
 
 COMBAT RULES
