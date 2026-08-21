@@ -3,6 +3,7 @@
 from backend.ai.game_master import GameMaster
 from backend.game.character_creation import run_character_creation
 from backend.game.level_up import run_spending_screen
+from backend.game.ability_learning import run_ap_spending_screen
 
 
 def _position_xy(actor) -> tuple[int, int]:
@@ -15,7 +16,7 @@ def _position_xy(actor) -> tuple[int, int]:
 def _print_progress(player) -> None:
     print("\n📈 PROGRESSION")
     print(f"Level: {int(player.get('level', 1))}/100 | XP Orbs: {int(player.get('xp_orbs', 0))}/{int(player.get('xp_to_next_level', 0))}")
-    print(f"Unspent SP: {int(player.get('skill_points_unspent', player.get('attribute_points_unspent', 0)) or 0)} | Unspent AP: {int(player.get('ability_points', 0) or 0)}")
+    print(f"Unspent SP: {int(player.get('skill_points_unspent', player.get('attribute_points_unspent', 0)) or 0)} | Stored AP: {int(player.get('ability_points', 0) or 0)}")
 
 
 def _print_combat_hud(combat) -> None:
@@ -77,8 +78,8 @@ def _print_combat_results(results, combat=None) -> None:
 def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
     print("Type 'start game' to build a new character.")
-    print("Type 'progress' to view Level, XP Orbs, SP, and AP.")
-    print("Type 'spend sp' to upgrade your stats with saved Skill Points. Type 'quit' to stop.\n")
+    print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
+    print("Type 'spend sp' to upgrade stats. Type 'spend ap' to learn abilities. Type 'quit' to stop.\n")
     game_master = GameMaster()
 
     while True:
@@ -89,6 +90,10 @@ def main() -> None:
             _print_progress(game_master.state.snapshot().get("player", {})); continue
         if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
             player = run_spending_screen(game_master)
+            _print_progress(player)
+            continue
+        if lowered in {"spend ap", "spend ability points", "learn ability", "learn abilities", "ability shop"}:
+            player = run_ap_spending_screen(game_master)
             _print_progress(player)
             continue
         if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
@@ -111,7 +116,7 @@ def main() -> None:
         after_player = game_master.state.snapshot().get("player", {})
         if int(after_player.get("level", 1) or 1) > before_level:
             print("\n⬆️ LEVEL UP!"); _print_progress(after_player)
-            print("Type 'spend sp' whenever you want to allocate your new Skill Points.")
+            print("Your SP and AP are stored. Spend them now or save them for later with 'spend sp' / 'spend ap'.")
         print("\n" + result.get("narration", "The world waits...") + "\n")
 
 
