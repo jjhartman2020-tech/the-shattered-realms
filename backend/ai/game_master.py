@@ -11,6 +11,7 @@ from backend.game.abilities import resolve_ability
 from backend.game.attributes import SKILL_ATTRIBUTE, attribute_check_bonus, build_combatant, normalize_attributes
 from backend.game.checks import resolve_check
 from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack, start_combat
+from backend.game.resources import resource_key, resource_name_for_class
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
 
@@ -138,8 +139,8 @@ class GameMaster:
             resolved_context["active_combat"] = active_combat
             resolved_context["combat_result"] = combat_results
             resolved_context["mechanical_instruction"] = (
-                "Python has resolved combat. Narrate movement, remaining movement, primary-action use, abilities, resource costs, cooldowns, defending, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
-                "Positions, resources, action availability, defense state, and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, resources, cooldowns, or alter the results."
+                "Python has resolved combat. Narrate movement, remaining movement, primary-action use, abilities, class-resource costs, defending, initiative, attacks, range, damage, HP, critical results, defeats, and turn progression exactly. "
+                "Positions, resources, action availability, defense state, and distances in active_combat are authoritative. Do not reroll, move characters again, alter positions, resources, or alter the results."
             )
             narrated = self.provider.respond(resolved_context)
             narrated["combat_request"] = None
@@ -194,26 +195,32 @@ class GameMaster:
     def _fresh_template_actor(self, raw_actor: Dict) -> Dict:
         actor = deepcopy(raw_actor)
         max_hp = max(0, int(actor.get("max_hp", actor.get("hp", 0)) or 0))
-        max_mana = max(0, int(actor.get("max_mana", actor.get("mana", 0)) or 0))
+        max_resource = max(0, int(actor.get("max_resource", actor.get("max_mana", 0)) or 0))
         actor["hp"] = max_hp
         actor["max_hp"] = max_hp
-        actor["mana"] = max_mana
-        actor["max_mana"] = max_mana
+        actor["resource"] = max_resource
+        actor["max_resource"] = max_resource
+        actor["mana"] = max_resource
+        actor["max_mana"] = max_resource
         actor["movement_used"] = 0
         actor["primary_action_used"] = False
         actor["defending"] = False
         actor["active_defense_ac_bonus"] = 0
-        actor["ability_cooldowns"] = {}
+        actor.pop("ability_cooldowns", None)
         actor["defeated"] = False
         return actor
 
     def _build_enemy_from_spec(self, raw_enemy: Dict) -> Dict:
+        resource_name = str(raw_enemy.get("resource_name") or resource_name_for_class(raw_enemy.get("class")))
         overrides = {
             "armor_class": int(raw_enemy.get("armor_class", 10)),
             "damage": str(raw_enemy.get("damage", "1d4")),
             "attack_attribute": str(raw_enemy.get("attack_attribute", "strength")),
             "role": str(raw_enemy.get("role", "fighter")),
             "attack_bonus": int(raw_enemy.get("attack_bonus", 0)),
+            "class": str(raw_enemy.get("class") or "unassigned"),
+            "resource_name": resource_name,
+            "resource_type": resource_key(resource_name),
         }
         if raw_enemy.get("position") is not None:
             overrides["position"] = raw_enemy.get("position")
@@ -224,7 +231,7 @@ class GameMaster:
         enemy_hp = int(raw_enemy.get("hp", 0)) if int(raw_enemy.get("hp", 0)) > 0 else None
         if enemy_hp is not None:
             overrides["max_hp"] = enemy_hp
-        return build_combatant(
+        actor = build_combatant(
             str(raw_enemy.get("name") or "Enemy"),
             "enemy",
             normalize_attributes(raw_enemy.get("attributes") or {}),
@@ -232,19 +239,31 @@ class GameMaster:
             hp=enemy_hp,
             overrides=overrides,
         )
+        if raw_enemy.get("resource") is not None:
+            actor["resource"] = max(0, min(int(actor.get("max_resource", 0)), int(raw_enemy.get("resource"))))
+            actor["mana"] = actor["resource"]
+        return actor
 
     def _start_combat(self, request: Dict) -> Dict:
         snapshot = self.state.snapshot()
         player = snapshot.get("player", {})
         player_name = str(player.get("name") or "Traveler")
         attributes = normalize_attributes(player.get("stats") or player.get("attributes") or {})
+        resource_name = str(player.get("resource_name") or resource_name_for_class(player.get("class")))
         player_actor = build_combatant(player_name, "player", attributes, level=int(player.get("level", 1)), hp=int(player.get("hp", 0)) if int(player.get("hp", 0)) > 0 else None, overrides={
             "armor_class": int(player.get("armor_class", 10)),
             "damage": str(player.get("damage", "1d6")),
             "attack_bonus": int(player.get("attack_bonus", 0)),
             "position": player.get("combat_position", {"x": 0, "y": 0}),
             "abilities": deepcopy(player.get("equipped_abilities", [])) if isinstance(player.get("equipped_abilities"), list) else [],
+            "class": str(player.get("class") or "unassigned"),
+            "resource_name": resource_name,
+            "resource_type": str(player.get("resource_type") or resource_key(resource_name)),
+            "resource": int(player.get("resource", player.get("mana", 0)) or 0),
+            "max_resource": int(player.get("max_resource", player.get("max_mana", 0)) or 0),
         })
+        player_actor["mana"] = int(player_actor.get("resource", 0))
+        player_actor["max_mana"] = int(player_actor.get("max_resource", 0))
         combatants = [player_actor]
 
         reset_pending = bool(snapshot.get("encounter_reset_pending"))
@@ -274,12 +293,16 @@ class GameMaster:
         pristine = deepcopy(combat)
         for actor in pristine.get("combatants", []):
             actor["hp"] = int(actor.get("max_hp", actor.get("hp", 0)))
-            actor["mana"] = int(actor.get("max_mana", actor.get("mana", 0)))
+            max_resource = int(actor.get("max_resource", actor.get("max_mana", 0)) or 0)
+            actor["resource"] = max_resource
+            actor["max_resource"] = max_resource
+            actor["mana"] = max_resource
+            actor["max_mana"] = max_resource
             actor["movement_used"] = 0
             actor["primary_action_used"] = False
             actor["defending"] = False
             actor["active_defense_ac_bonus"] = 0
-            actor["ability_cooldowns"] = {}
+            actor.pop("ability_cooldowns", None)
             actor["defeated"] = False
         self.state.set_path("encounter_template", {"combatants": pristine.get("combatants", []), "grid": pristine.get("grid", {})}, save=False)
         self.state.set_path("encounter_reset_pending", False, save=False)
@@ -340,8 +363,14 @@ class GameMaster:
             if actor.get("name") == player_name:
                 self.state.set_path("player.hp", int(actor.get("hp", 0)), save=False)
                 self.state.set_path("player.max_hp", int(actor.get("max_hp", 0)), save=False)
-                self.state.set_path("player.mana", int(actor.get("mana", 0)), save=False)
-                self.state.set_path("player.max_mana", int(actor.get("max_mana", 0)), save=False)
+                resource = int(actor.get("resource", actor.get("mana", 0)) or 0)
+                max_resource = int(actor.get("max_resource", actor.get("max_mana", 0)) or 0)
+                self.state.set_path("player.resource_name", str(actor.get("resource_name") or "Mana"), save=False)
+                self.state.set_path("player.resource_type", str(actor.get("resource_type") or "mana"), save=False)
+                self.state.set_path("player.resource", resource, save=False)
+                self.state.set_path("player.max_resource", max_resource, save=False)
+                self.state.set_path("player.mana", resource, save=False)
+                self.state.set_path("player.max_mana", max_resource, save=False)
                 self.state.set_path("player.combat_position", actor.get("position", {"x": 0, "y": 0}), save=False)
                 break
         self.state.save()
