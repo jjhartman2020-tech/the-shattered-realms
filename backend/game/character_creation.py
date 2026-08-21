@@ -41,24 +41,24 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
         ],
         "starter_kits": [
             {"name": "Vanguard Kit", "items": [
-                {"name": "Worn Iron Sword", "type": "weapon", "description": "A plain starter sword.", "damage": "1d6", "resource_cost": 0, "range": 1, "attack_attribute": "strength"},
+                {"name": "Worn Iron Sword", "type": "weapon", "description": "A plain starter sword.", "damage": "1d6", "range": 1, "attack_attribute": "strength"},
                 {"name": "Leather Coat", "type": "armor", "description": "Simple light protection.", "armor_bonus": 1},
                 {"name": "Healing Draught", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
             ]},
             {"name": "Scout Kit", "items": [
-                {"name": "Simple Shortbow", "type": "weapon", "description": "A modest starter bow.", "damage": "1d4", "resource_cost": 0, "range": 5, "attack_attribute": "dexterity"},
+                {"name": "Simple Shortbow", "type": "weapon", "description": "A modest starter bow.", "damage": "1d4", "range": 5, "attack_attribute": "dexterity"},
                 {"name": "Travel Cloak", "type": "armor", "description": "Light protection for the road.", "armor_bonus": 1},
                 {"name": "Rope", "type": "utility", "description": "Useful for climbing and traversal."},
             ]},
             {"name": "Mystic Kit", "items": [
-                {"name": "Cracked Focus Rod", "type": "weapon", "description": "A weak magical focus.", "damage": "1d4", "resource_cost": 5, "range": 4, "attack_attribute": "magic"},
+                {"name": "Cracked Focus Rod", "type": "weapon", "description": "A weak magical focus.", "damage": "1d4", "range": 4, "attack_attribute": "magic"},
                 {"name": "Padded Robes", "type": "armor", "description": "Basic protective robes.", "armor_bonus": 1},
                 {"name": "Restorative Tonic", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
             ]},
         ],
         "special_equipment": [
-            {"name": "Balanced Knife", "type": "weapon", "description": "A quick but weak backup blade.", "damage": "1d4", "resource_cost": 0, "range": 1, "attack_attribute": "dexterity"},
-            {"name": "Hunter's Sling", "type": "weapon", "description": "A simple ranged backup weapon.", "damage": "1d4", "resource_cost": 0, "range": 4, "attack_attribute": "dexterity"},
+            {"name": "Balanced Knife", "type": "weapon", "description": "A quick but weak backup blade.", "damage": "1d4", "range": 1, "attack_attribute": "dexterity"},
+            {"name": "Hunter's Sling", "type": "weapon", "description": "A simple ranged backup weapon.", "damage": "1d4", "range": 4, "attack_attribute": "dexterity"},
             {"name": "Faded Runestone", "type": "focus", "description": "A minor magical focus.", "effect": "+1 to one Magic-based check when specifically invoked by a valid effect."},
             {"name": "Reinforced Buckler", "type": "shield", "description": "A compact defensive tool.", "armor_bonus": 1},
             {"name": "Traveler's Charm", "type": "accessory", "description": "A small class-themed keepsake.", "effect": "Story utility only."},
@@ -82,6 +82,29 @@ def _normalize_starter_abilities(abilities: List[Dict]) -> List[Dict]:
     return normalized
 
 
+def _normalize_items(items: List[Dict]) -> List[Dict]:
+    """Weapons never consume class Resource; Resource costs belong to abilities."""
+    normalized: List[Dict] = []
+    for raw in items:
+        item = deepcopy(raw) if isinstance(raw, dict) else {}
+        if str(item.get("type") or "").strip().lower() == "weapon":
+            item.pop("resource_cost", None)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_generated_equipment(package: Dict) -> Dict:
+    result = deepcopy(package)
+    kits = []
+    for raw_kit in result.get("starter_kits", []):
+        kit = deepcopy(raw_kit) if isinstance(raw_kit, dict) else {}
+        kit["items"] = _normalize_items(kit.get("items", []))
+        kits.append(kit)
+    result["starter_kits"] = kits
+    result["special_equipment"] = _normalize_items(result.get("special_equipment", []))
+    return result
+
+
 def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
     parts: List[str] = []
     if entry.get("damage") not in {None, "", "0", 0}: parts.append(f"Damage {entry['damage']}")
@@ -90,7 +113,7 @@ def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
     if entry.get("movement_squares") not in {None, "", "0", 0}: parts.append(f"Move {entry['movement_squares']} squares")
     if entry.get("armor_bonus") not in {None, "", "0", 0}: parts.append(f"Armor +{entry['armor_bonus']}")
     if entry.get("range") is not None and entry.get("type") in {"weapon", "active", None}: parts.append(f"Range {entry['range']}")
-    if entry.get("resource_cost") is not None:
+    if entry.get("resource_cost") is not None and str(entry.get("type") or "").strip().lower() != "weapon":
         parts.append(f"Cost {int(entry.get('resource_cost', 0) or 0)} {resource_name or 'Resource'}")
     if entry.get("tier"):
         tier = str(entry["tier"]).title()
@@ -107,7 +130,7 @@ def generate_character_package(provider, *, name: str, appearance: str, stats: D
     if client is None or not model:
         generated = _fallback_generation(name, appearance, stats)
         generated["abilities"] = _normalize_starter_abilities(generated["abilities"])
-        return generated
+        return _normalize_generated_equipment(generated)
 
     instructions = """You generate starting characters for The Shattered Realms. Return ONLY valid JSON.
 Use the player's exact name and appearance as fixed canon. Use the confirmed 13-stat build to inspire but never alter the build.
@@ -115,8 +138,8 @@ Generate a unique beginner-friendly class, thematic resource name, and backstory
 Generate exactly 6 BEGINNER abilities. Every starter ability has tier='beginner' and ability_point_cost=1. Character-creation ability choices are granted as part of the starting package, so the player does not spend AP for the two chosen starters.
 Every ability must have exact mechanics: name, description, resource_cost, target, range and exact applicable fields such as damage, healing, movement_squares, shield, duration, target_count, or effect. Resource costs are real points in multiples of 5. Do NOT reduce costs to 0 just because the character has 0 or low maximum Resource. A player may choose an ability they cannot currently afford; it remains unusable until Resource is raised.
 Starter abilities must be weak compared with later Novice/Expert/Master/Legendary abilities.
-Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, damage, resource_cost, range, attack_attribute.
-Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Do not grant permanent stat increases.
+Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, damage, range, and attack_attribute. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
+Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have no resource_cost. Do not grant permanent stat increases.
 Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
     payload = {"name": name, "appearance": appearance, "confirmed_stats": stats,
                "derived": {"max_hp": sheet["max_health_base"], "max_resource": max_resource,
@@ -129,7 +152,7 @@ Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, s
     if not isinstance(generated, dict) or len(generated.get("abilities", [])) != 6 or len(generated.get("starter_kits", [])) != 3 or len(generated.get("special_equipment", [])) != 6:
         generated = _fallback_generation(name, appearance, stats)
     generated["abilities"] = _normalize_starter_abilities(generated.get("abilities", []))
-    return generated
+    return _normalize_generated_equipment(generated)
 
 
 def _choose_many(options: List[Dict], count: int, prompt: str) -> List[Dict]:
