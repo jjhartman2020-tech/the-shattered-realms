@@ -1,6 +1,6 @@
 # Stats.md
 
-Version: 2.1
+Version: 2.2
 Status: In Development
 
 ---
@@ -16,7 +16,7 @@ Design goals:
 - Long campaigns need room for continued progression.
 - d20 modifiers must not become unbounded at high attributes.
 - Derived values such as movement, resource capacity, resistance, and critical chance use their own documented formulas.
-- Skills are derived from attributes and will be documented separately.
+- Skills are derived from attributes rather than purchased directly with Attribute Points.
 
 ---
 
@@ -265,14 +265,7 @@ Intelligence uses the standard attribute modifier:
 - +1 per full 3 Intelligence through 30.
 - After 30, +1 per full 10 additional Intelligence.
 
-Intelligence is intended for mechanics and skills such as:
-
-- Investigation
-- Engineering
-- Arcane and magical knowledge
-- History and learned knowledge
-- Technical problem-solving
-- Intelligence-based abilities and requirements
+Intelligence is intended for mechanics and skills such as Investigation, Engineering, Arcana, History, Nature, learned knowledge, and technical problem-solving.
 
 **Intelligence represents understanding magic; it does not determine raw magical power. Raw magical power is governed by Magic.**
 
@@ -301,8 +294,6 @@ Charisma uses the standard attribute modifier:
 - After 30, +1 per full 10 additional Charisma.
 
 Charisma-based social checks, abilities, and requirements use this modifier when appropriate.
-
-The exact skill mapping for Persuasion, Deception, Intimidation, Performance, and other social skills will be defined in the skill system.
 
 ---
 
@@ -438,7 +429,108 @@ A character may therefore understand magic extremely well without being powerful
 
 ---
 
-# 18. Attribute Requirements
+# 18. Skill System
+
+Skills represent trained or specialized applications of the core attributes.
+
+## Core Rule
+
+Skills do **not** receive Attribute Points directly during character creation or normal attribute progression.
+
+A skill check normally begins with the Standard Attribute Modifier of its governing attribute.
+
+Example:
+
+A character with Agility 18 has a +6 Standard Agility Modifier. A normal Stealth check therefore begins with:
+
+`d20 + 6`
+
+Any future proficiency, expertise, equipment, ability, status, or situational bonuses are added separately and must be defined by their own system.
+
+## Default Skill Mapping
+
+### Strength
+
+- **Athletics** — climbing, jumping, swimming, and forceful physical movement.
+- **Grappling** — controlling, restraining, wrestling, or physically contesting another creature.
+- **Might** — feats of raw force such as lifting, bending, smashing, dragging, or overpowering heavy resistance.
+
+### Dexterity
+
+- **Sleight of Hand** — concealed hand movements, palming, trick handling, and delicate manipulation.
+- **Lockpicking** — manipulating locks and similar precision mechanisms.
+- **Pickpocketing** — stealing or planting small objects without being noticed.
+- **Precision** — extremely fine aiming, hand control, delicate actions, and precision tasks not covered by another skill.
+
+### Agility
+
+- **Acrobatics** — flips, controlled landings, difficult body movement, and agile maneuvers.
+- **Stealth** — moving and positioning without being detected.
+- **Evasion** — avoiding hazards, dodging environmental threats, and reactive body movement when an Agility check is appropriate.
+
+### Constitution
+
+- **Endurance** — sustaining prolonged physical effort, resisting exhaustion, and pushing through strenuous conditions.
+- **Fortitude** — resisting bodily shock, pain, harsh environments, and physical effects that test toughness.
+
+### Intelligence
+
+- **Investigation** — analyzing clues, searching methodically, reconstructing events, and solving evidence-based problems.
+- **Arcana** — understanding magical theory, magical history, runes, rituals, and supernatural systems.
+- **History** — recalling historical events, cultures, people, wars, kingdoms, and established lore.
+- **Nature** — learned knowledge of creatures, plants, environments, ecosystems, and natural phenomena.
+- **Engineering** — designing, understanding, repairing, sabotaging, or analyzing machines, mechanisms, structures, and technical systems.
+
+### Wisdom
+
+- **Perception** — noticing visible, audible, or otherwise detectable details in the environment.
+- **Insight** — reading motives, emotions, intentions, and social behavior.
+- **Survival** — tracking, navigation, wilderness survival, finding shelter, and handling environmental challenges.
+- **Medicine** — diagnosing injuries or illness, stabilizing others, and applying practical medical knowledge.
+- **Animal Handling** — calming, directing, understanding, training, or safely interacting with animals and similar creatures.
+
+### Charisma
+
+- **Persuasion** — convincing others through reason, diplomacy, charm, or negotiation.
+- **Deception** — lying, misleading, disguising intent, and maintaining false stories.
+- **Intimidation** — pressuring or frightening others into compliance.
+- **Performance** — entertaining, acting, storytelling, music, public presentation, and deliberate showmanship.
+- **Leadership** — rallying, commanding, inspiring, coordinating, or directing others.
+
+### Magic
+
+- **Spellcasting** — accurately controlling and executing active magical effects when a Magic skill check is required.
+- **Channeling** — controlling, sustaining, shaping, or safely directing raw magical power or unstable supernatural energy.
+
+## Attributes Without Permanent Skill Lists
+
+Health, Resource, Speed, Defense, and Luck do not require artificial permanent skills simply to have a skill attached to them. They already have major direct mechanical roles.
+
+When appropriate, the Game Master may call for direct attribute checks such as:
+
+- Health for a challenge specifically testing life force or raw vitality.
+- Resource for controlling or enduring unusual strain on the class-resource system.
+- Speed for races, chases, reaction-speed contests, or raw quickness.
+- Defense for guarding, bracing, or defensive-technique contests outside the normal Defend action.
+- Luck for explicit chance-based situations where no other skill or attribute better represents the outcome.
+
+## Contextual Attribute Use
+
+The listed governing attributes are the **defaults**, not absolute restrictions.
+
+When the player's method clearly uses another attribute, the Game Master may pair a skill with a different attribute as long as the choice follows the described action and does not exist only to grant the player a larger bonus.
+
+Examples:
+
+- Intimidation normally uses Charisma, but bending an iron bar to frighten someone may use **Intimidation (Strength)**.
+- Escaping a grapple through body movement may use Agility, while overpowering the opponent may use **Grappling or Athletics (Strength)**.
+- Identifying a spell uses **Arcana (Intelligence)**, while overpowering an unstable spell uses **Channeling (Magic)**.
+
+The AI Game Master chooses the appropriate skill/attribute pairing from the player's described method. The Python rules engine remains authoritative for the actual attribute value, modifier, roll, and result.
+
+---
+
+# 19. Attribute Requirements
 
 Raw attribute values may be used as requirements for weapons, armor, shields, abilities, equipment, dialogue options, environmental interactions, and other systems.
 
@@ -446,11 +538,11 @@ Requirements should be visible or logically discoverable to the player when rele
 
 ---
 
-# 19. Derived Systems Still To Finalize
+# 20. Derived Systems Still To Finalize
 
 The following systems will be finalized in their own documentation and then cross-checked against this file:
 
-- Skill list and attribute-to-skill mapping, including Engineering under Intelligence and magical-use skills under Magic where appropriate
+- Skill proficiency and expertise progression/bonuses
 - Passive Armor Class formula
 - Strength physical-damage scaling beyond the d20 modifier
 - Magic damage/healing scaling beyond the d20 modifier
