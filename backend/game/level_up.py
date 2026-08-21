@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 
 from .attributes import ATTRIBUTE_NAMES, NATURAL_ATTRIBUTE_CAP, character_sheet_channels
 
@@ -22,11 +23,13 @@ def _derived_summary(stats: dict, level: int, resource_name: str) -> dict:
     }
 
 
-def _print_stats(stats: dict, remaining: int) -> None:
-    print("\nSKILL POINTS")
+def _print_full_build(stats: dict, remaining: int) -> None:
+    print("\n" + "=" * 48)
+    print("CURRENT 13-STAT BUILD")
     print(f"Unspent SP: {remaining}")
-    for index, name in enumerate(ATTRIBUTE_NAMES, 1):
-        print(f"{index:>2}. {name.title():<14} {int(stats.get(name, 0))}")
+    print("=" * 48)
+    for name in ATTRIBUTE_NAMES:
+        print(f"  {name.title():<14} {int(stats.get(name, 0))}")
 
 
 def _print_changes(before: dict, after: dict) -> None:
@@ -41,6 +44,17 @@ def _print_changes(before: dict, after: dict) -> None:
             print(f"  {key}: {old_value}{suffix} -> {new_value}{suffix} ({sign}{new_value-old_value}{suffix})")
     if not changed:
         print("  No derived breakpoint changed yet. The raw stat increase still counts toward future scaling.")
+
+
+def _parse_sp_command(raw: str) -> tuple[str | None, int | None]:
+    """Parse commands like 'speed,3 sp', 'speed 3', or 'magic, 2'."""
+    cleaned = raw.strip().lower().replace("skill points", "sp").replace("skill point", "sp")
+    match = re.fullmatch(r"\s*([a-z_ ]+)\s*[, ]+\s*(\d+)\s*(?:sp)?\s*", cleaned)
+    if not match:
+        return None, None
+    stat = match.group(1).strip().replace(" ", "_")
+    amount = int(match.group(2))
+    return stat, amount
 
 
 def run_spending_screen(game_master) -> dict:
@@ -64,15 +78,13 @@ def run_spending_screen(game_master) -> dict:
     remaining = available
     before_sheet = _derived_summary(original_stats, level, resource_name)
 
-    print("\n" + "=" * 48)
-    print("SPEND SKILL POINTS")
-    print("=" * 48)
-    print("Enter a stat number or name, then choose how many SP to add.")
-    print("Type 'done' to review/confirm, or 'cancel' to leave without spending anything.")
+    print("\nSPEND SKILL POINTS")
+    print("Enter upgrades in one line, for example: speed,3 sp")
+    print("You may spend some SP and save the rest. Type 'done' to review or 'cancel' to leave without spending.")
 
     while True:
-        _print_stats(working, remaining)
-        raw = input("\nStat to increase (or done/cancel): ").strip().lower()
+        _print_full_build(working, remaining)
+        raw = input("\nWhat do you spend SP on? (example: speed,3 sp): ").strip().lower()
         if raw in {"cancel", "quit", "exit"}:
             print("No SP spent.")
             return deepcopy(player)
@@ -83,35 +95,28 @@ def run_spending_screen(game_master) -> dict:
                 continue
             after_sheet = _derived_summary(working, level, resource_name)
             _print_changes(before_sheet, after_sheet)
-            print(f"\nSP to spend now: {spent} | SP remaining afterward: {remaining}")
+            print(f"\nSP to spend now: {spent} | SP saved for later: {remaining}")
             if input("Confirm these upgrades? (yes/no): ").strip().lower() in {"yes", "y"}:
                 break
             print("Keep editing your allocation.")
             continue
 
-        if raw.isdigit():
-            index = int(raw) - 1
-            stat = ATTRIBUTE_NAMES[index] if 0 <= index < len(ATTRIBUTE_NAMES) else ""
-        else:
-            stat = raw.replace(" ", "_")
-        if stat not in ATTRIBUTE_NAMES:
-            print("Unknown stat.")
+        stat, amount = _parse_sp_command(raw)
+        if stat not in ATTRIBUTE_NAMES or amount is None:
+            print("Use the format 'stat,amount sp' — for example: speed,3 sp")
             continue
         current = int(working.get(stat, 0) or 0)
         room = NATURAL_ATTRIBUTE_CAP - current
         maximum = min(remaining, room)
         if maximum <= 0:
-            print("That stat cannot be increased right now.")
+            print(f"{stat.title()} cannot be increased right now.")
             continue
-        try:
-            amount = int(input(f"Add how many SP to {stat.title()}? (1-{maximum}): ").strip())
-        except ValueError:
-            amount = 0
-        if not 1 <= amount <= maximum:
-            print("Invalid amount.")
+        if amount < 1 or amount > maximum:
+            print(f"You can add 1-{maximum} SP to {stat.title()} right now.")
             continue
         working[stat] = current + amount
         remaining -= amount
+        print(f"Queued: {stat.title()} {current} -> {working[stat]} ({amount} SP)")
 
     old_hp = int(player.get("hp", 0) or 0)
     old_max_hp = int(player.get("max_hp", old_hp) or old_hp)
@@ -122,10 +127,9 @@ def run_spending_screen(game_master) -> dict:
 
     player["stats"] = deepcopy(working)
     player["skill_points_unspent"] = remaining
-    player["attribute_points_unspent"] = remaining  # legacy save compatibility
+    player["attribute_points_unspent"] = remaining
     state._migrate_player()
 
-    # Increasing capacity does not magically erase existing damage/resource spent.
     player = state.data.setdefault("player", {})
     player["hp"] = max(0, int(player.get("max_hp", 0)) - hp_missing)
     player["resource"] = max(0, int(player.get("max_resource", 0)) - resource_missing)
@@ -133,11 +137,6 @@ def run_spending_screen(game_master) -> dict:
     state.save()
 
     print("\nUPGRADES SAVED")
-    print(f"SP remaining: {remaining}")
-    for name in ATTRIBUTE_NAMES:
-        old = int(original_stats.get(name, 0) or 0)
-        new = int(working.get(name, 0) or 0)
-        if new != old:
-            print(f"  {name.title()}: {old} -> {new}")
+    _print_full_build(working, remaining)
     _print_changes(before_sheet, _derived_summary(working, level, resource_name))
     return deepcopy(player)
