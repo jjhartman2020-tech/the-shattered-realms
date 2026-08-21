@@ -95,4 +95,10 @@ def run_world_creation(game_master) -> Dict:
     game_master.state.data["world_profile"] = deepcopy(world)
     game_master.state.data["world_creation_complete"] = True
     game_master.state.save()
+
+    # Character creation now offers either manual 42-SP allocation or an AI-built
+    # allocation based on the player's build description and this world profile.
+    from .ai_stat_builder import install_ai_stat_allocator
+    install_ai_stat_allocator(game_master)
+
     return deepcopy(world)
