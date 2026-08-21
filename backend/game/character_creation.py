@@ -13,6 +13,7 @@ from .attributes import (
     normalize_attributes,
     validate_allocation,
 )
+from .dice import normalize_damage_expression
 from .progression import ABILITY_TIER_COSTS, xp_required_for_next_level
 from .resources import resource_key
 
@@ -78,15 +79,23 @@ def _normalize_starter_abilities(abilities: List[Dict]) -> List[Dict]:
         ability["resource_cost"] = cost
         ability["tier"] = "beginner"
         ability["ability_point_cost"] = 1
+        if ability.get("damage") not in {None, "", "0", 0}:
+            ability["damage"] = normalize_damage_expression(ability.get("damage"), "1d4")
+        if ability.get("healing") not in {None, "", "0", 0}:
+            ability["healing"] = normalize_damage_expression(ability.get("healing"), "1d4")
         normalized.append(ability)
     return normalized
 
 
 def _normalize_items(items: List[Dict]) -> List[Dict]:
-    """Weapons never consume class Resource; Resource costs belong to abilities."""
+    """Normalize generated item mechanics before display/storage."""
     normalized: List[Dict] = []
     for raw in items:
         item = deepcopy(raw) if isinstance(raw, dict) else {}
+        if item.get("damage") not in {None, "", "0", 0}:
+            item["damage"] = normalize_damage_expression(item.get("damage"), "1d4")
+        if item.get("healing") not in {None, "", "0", 0}:
+            item["healing"] = normalize_damage_expression(item.get("healing"), "1d4")
         if str(item.get("type") or "").strip().lower() == "weapon":
             item.pop("resource_cost", None)
         normalized.append(item)
@@ -107,8 +116,8 @@ def _normalize_generated_equipment(package: Dict) -> Dict:
 
 def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
     parts: List[str] = []
-    if entry.get("damage") not in {None, "", "0", 0}: parts.append(f"Damage {entry['damage']}")
-    if entry.get("healing") not in {None, "", "0", 0}: parts.append(f"Healing {entry['healing']}")
+    if entry.get("damage") not in {None, "", "0", 0}: parts.append(f"Damage {normalize_damage_expression(entry['damage'], '1d4')}")
+    if entry.get("healing") not in {None, "", "0", 0}: parts.append(f"Healing {normalize_damage_expression(entry['healing'], '1d4')}")
     if entry.get("shield") not in {None, "", "0", 0}: parts.append(f"Shield {entry['shield']}")
     if entry.get("movement_squares") not in {None, "", "0", 0}: parts.append(f"Move {entry['movement_squares']} squares")
     if entry.get("armor_bonus") not in {None, "", "0", 0}: parts.append(f"Armor +{entry['armor_bonus']}")
@@ -136,10 +145,10 @@ def generate_character_package(provider, *, name: str, appearance: str, stats: D
 Use the player's exact name and appearance as fixed canon. Use the confirmed 13-stat build to inspire but never alter the build.
 Generate a unique beginner-friendly class, thematic resource name, and backstory.
 Generate exactly 6 BEGINNER abilities. Every starter ability has tier='beginner' and ability_point_cost=1. Character-creation ability choices are granted as part of the starting package, so the player does not spend AP for the two chosen starters.
-Every ability must have exact mechanics: name, description, resource_cost, target, range and exact applicable fields such as damage, healing, movement_squares, shield, duration, target_count, or effect. Resource costs are real points in multiples of 5. Do NOT reduce costs to 0 just because the character has 0 or low maximum Resource. A player may choose an ability they cannot currently afford; it remains unusable until Resource is raised.
+Every ability must have exact mechanics: name, description, resource_cost, target, range and exact applicable fields such as damage, healing, movement_squares, shield, duration, target_count, or effect. Damage and healing MUST use dice notation such as 1d4, 1d6, 1d8, or 2d6, never fixed totals such as 4 or 6. Resource costs are real points in multiples of 5. Do NOT reduce costs to 0 just because the character has 0 or low maximum Resource. A player may choose an ability they cannot currently afford; it remains unusable until Resource is raised.
 Starter abilities must be weak compared with later Novice/Expert/Master/Legendary abilities.
-Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, damage, range, and attack_attribute. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
-Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have no resource_cost. Do not grant permanent stat increases.
+Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, dice-based damage, range, and attack_attribute. Weapon damage MUST be a dice expression, never a fixed total. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
+Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have dice-based damage and no resource_cost. Do not grant permanent stat increases.
 Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
     payload = {"name": name, "appearance": appearance, "confirmed_stats": stats,
                "derived": {"max_hp": sheet["max_health_base"], "max_resource": max_resource,
@@ -286,7 +295,7 @@ def run_character_creation(game_master) -> Dict:
         "unlocked_abilities": deepcopy(chosen_abilities), "equipped_abilities": deepcopy(chosen_abilities),
         "starter_kit": deepcopy(chosen_kit), "inventory": all_items,
         "special_starting_equipment": deepcopy(chosen_equipment), "equipped_weapon": deepcopy(starter_weapon),
-        "damage": str(starter_weapon.get("damage", "1d4")) if starter_weapon else "1d4",
+        "damage": normalize_damage_expression(starter_weapon.get("damage", "1d4"), "1d4") if starter_weapon else "1d4",
         "character_creation_complete": True,
     })
     game_master.state.data.update({"combat": {"active": False}, "encounter_template": {},
