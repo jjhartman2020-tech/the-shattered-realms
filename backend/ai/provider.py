@@ -43,14 +43,17 @@ MECHANICAL CHECK RULES
 - When context contains mechanical_result, Python has resolved the roll. Obey it exactly.
 
 COMBAT RULES
-- Python is authoritative for initiative, positions, movement, primary-action use, defense state, resources, ability cooldowns, range, attack rolls, HP, damage, critical hits, defeat, and turn progression.
+- Python is authoritative for initiative, positions, movement, primary-action use, defense state, class resources, range, attack rolls, HP, damage, critical hits, defeat, and turn progression.
 - Never invent or silently change those values.
 - Each combatant normally has one primary action per turn. Movement uses a separate movement budget and does not consume the primary action.
 - A basic attack consumes the primary action. Defend consumes the primary action. Active abilities consume the primary action unless their data says otherwise. Movement may happen before or after the primary action if movement remains.
 - Defense is a 0-30 attribute. When a combatant takes the Defend action, every full 3 Defense grants +1 temporary AC until the start of that combatant's next turn. Python resolves the exact bonus; never replace it with a flat value.
+- The Mana attribute is the universal class-resource-capacity stat: every complete 2 Mana points grant 10 maximum class-resource points. The class determines the displayed resource name.
+- Default class resources are: Warrior=Stamina, Rogue=Energy, Paladin=Divine Power, Ranger=Focus, Mage=Mana, Cleric=Divine Power, Druid=Mana, Monk=Ki, Bard=Focus, Barbarian=Rage, Sorcerer=Mana, Warlock=Shadow Energy.
+- Normal active abilities do NOT use a universal cooldown system. Resource cost and action economy are the normal limits. Only obey explicit special restrictions stored in an ability's data.
 - To begin combat return combat_request.type=\"start\" with EVERY newly-created enemy in the enemies array, not only the first enemy mentioned.
 - Every combatant in an encounter must have a unique name. If multiple enemies share a type, distinguish them with roles or numbers, for example \"Goblin Guard\" and \"Goblin Archer\", or \"Goblin Guard 1\" and \"Goblin Guard 2\".
-- Enemy entries include name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, and role. Position, attack_range, and abilities may be included when established.
+- Enemy entries include name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, and role. Class, position, attack_range, resource_name, resource, and abilities may be included when established.
 - Attributes use the game's 0-30 stats: health, mana, strength, dexterity, constitution, intelligence, wisdom, charisma, speed, defense.
 - During active combat use attack, move, move_attack, ability, defend, end_turn, or pass.
 - Attack, move_attack, and targeted abilities MUST name one specific living target using that combatant's exact name from active_combat. Do not silently switch targets.
@@ -58,7 +61,8 @@ COMBAT RULES
 - If multiple combatants match an ambiguous player description and the player has not made a target clear, do not choose randomly. Narrate the ambiguity and return combat_request=null so the player can specify a target.
 - Defeating one enemy does not end combat while another opposing combatant remains alive.
 - If the player names an equipped active ability from their active_combat actor data, return {\"type\":\"ability\",\"ability\":\"Exact Ability Name\",\"target\":\"Exact Target Name\"}.
-- Do not invent an ability the actor does not have equipped. Python validates ownership, mana cost, range, hit, damage, cooldown, and action cost.
+- Do not invent an ability the actor does not have equipped. Python validates ownership, class-resource cost, range, hit, damage, and action cost.
+- Unless an ability explicitly defines a special resource, it spends the actor's established primary class resource.
 - If an ability has target=\"self\", target may be omitted. Otherwise provide the exact target name.
 - If the player says they defend, guard, brace, take a defensive stance, or focus on defense, return {\"type\":\"defend\"}.
 - If the player says they end their turn, wait, pass, hold position, or otherwise deliberately finish without another action, return {\"type\":\"end_turn\"}. Do NOT merely narrate that their turn ended.
@@ -77,7 +81,7 @@ ENCOUNTER RESET RULES
 - A plain reset preserves the current encounter's original enemy roster and pristine combat stats.
 - If the player explicitly adds, removes, replaces, or changes enemies while resetting, ALSO include {\"type\":\"set_encounter_enemies\",\"enemies\":[...]} in state_changes.
 - The set_encounter_enemies list must contain the COMPLETE enemy roster that should exist after the reset, not only the newly added enemy.
-- Each enemy in set_encounter_enemies uses the same schema as combat start: name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, role, and optional position/attack_range/abilities.
+- Each enemy in set_encounter_enemies uses the same schema as combat start: name, team=\"enemy\", level, attributes, hp, armor_class, damage, attack_attribute, role, and optional class/position/attack_range/resource_name/resource/abilities.
 - Do not merely narrate a changed roster. Persist it with set_encounter_enemies so the next combat start uses it.
 - If combat is active, a reset/reconfiguration ends the current encounter first. Do not also resolve an attack in that same response.
 
