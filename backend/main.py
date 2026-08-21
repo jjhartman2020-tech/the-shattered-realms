@@ -1,38 +1,7 @@
-"""Simple command-line entry point for testing the AI-first game runtime."""
+"""Command-line entry point for testing The Shattered Realms runtime."""
 
 from backend.ai.game_master import GameMaster
-
-
-def _format_damage_breakdown(event, first_label: str = "Weapon") -> str:
-    """Return a readable breakdown of engine-resolved damage."""
-    rolls = event.get("damage_rolls") or []
-    base_damage = 0
-    critical_dice_damage = 0
-    if isinstance(rolls, list) and rolls:
-        first = rolls[0]
-        if isinstance(first, dict):
-            base_damage = int(first.get("total", 0) or 0)
-        if len(rolls) > 1:
-            for extra in rolls[1:]:
-                if isinstance(extra, dict):
-                    critical_dice_damage += int(extra.get("total", 0) or 0)
-
-    stat_damage_bonus = int(event.get("damage_bonus", 0) or 0)
-    accuracy_damage_bonus = int(event.get("accuracy_margin_damage_bonus", 0) or 0)
-    resistance = int(event.get("physical_resistance_percent", 0) or 0)
-
-    parts = [f"{first_label}: {base_damage}"]
-    if stat_damage_bonus:
-        attribute = str(event.get("damage_bonus_attribute") or event.get("attack_attribute") or "Stat").upper()
-        label = "STR" if attribute == "STRENGTH" else attribute[:4]
-        parts.append(f"{label}: {stat_damage_bonus:+d}")
-    if accuracy_damage_bonus:
-        parts.append(f"Accuracy: {accuracy_damage_bonus:+d}")
-    if critical_dice_damage:
-        parts.append(f"Crit Dice: +{critical_dice_damage}")
-    if resistance:
-        parts.append(f"Resistance: {resistance}%")
-    return " | ".join(parts)
+from backend.game.character_creation import run_character_creation
 
 
 def _position_xy(actor) -> tuple[int, int]:
@@ -44,65 +13,35 @@ def _position_xy(actor) -> tuple[int, int]:
     return 0, 0
 
 
-def _print_movement_hud(combat) -> None:
-    """Show the player's current tactical turn state during combat."""
+def _print_combat_hud(combat) -> None:
     if not isinstance(combat, dict) or not combat.get("active"):
         return
-
     combatants = combat.get("combatants") or []
-    player = next(
-        (actor for actor in combatants if isinstance(actor, dict) and actor.get("team") == "player"),
-        None,
-    )
-    if not player:
-        return
+    player = next((a for a in combatants if isinstance(a, dict) and a.get("team") == "player"), None)
+    if player:
+        movement = int(player.get("movement", 0) or 0)
+        used = int(player.get("movement_used", 0) or 0)
+        x, y = _position_xy(player)
+        resource_name = str(player.get("resource_name") or "Resource")
+        resource = int(player.get("resource", player.get("mana", 0)) or 0)
+        max_resource = int(player.get("max_resource", player.get("max_mana", resource)) or resource)
+        action = "USED" if player.get("primary_action_used") else "READY"
+        order = combat.get("order") or []
+        index = int(combat.get("turn_index", 0) or 0)
+        turn = order[index] if order and 0 <= index < len(order) else "Unknown"
+        defending = f" | Defending +{int(player.get('active_defense_ac_bonus', 0) or 0)} AC" if player.get("defending") else ""
+        print("\n🏃 MOVEMENT HUD")
+        print(f"Round {combat.get('round', 1)} | Position: ({x}, {y}) | Movement: {max(0, movement-used)}/{movement} | {resource_name}: {resource}/{max_resource} | Action: {action} | Turn: {turn}{defending}")
 
-    movement_total = int(player.get("movement", 0) or 0)
-    movement_used = int(player.get("movement_used", 0) or 0)
-    movement_remaining = max(0, movement_total - movement_used)
-    resource_name = str(player.get("resource_name") or "Mana")
-    resource = int(player.get("resource", player.get("mana", 0)) or 0)
-    max_resource = int(player.get("max_resource", player.get("max_mana", resource)) or resource)
-    x, y = _position_xy(player)
-
-    order = combat.get("order") or []
-    turn_index = int(combat.get("turn_index", 0) or 0)
-    current_turn = order[turn_index] if order and 0 <= turn_index < len(order) else "Unknown"
-    round_number = int(combat.get("round", 1) or 1)
-    action_status = "USED" if player.get("primary_action_used") else "READY"
-    active_defense = int(player.get("active_defense_ac_bonus", 0) or 0)
-    defending = f" | Defending: +{active_defense} AC" if player.get("defending") else ""
-
-    print("\n🏃 MOVEMENT HUD")
-    print(
-        f"Round {round_number} | Position: ({x}, {y}) | "
-        f"Movement: {movement_remaining}/{movement_total} remaining ({movement_used} used) | "
-        f"{resource_name}: {resource}/{max_resource} | Action: {action_status} | Turn: {current_turn}{defending}"
-    )
-
-
-def _print_target_hud(combat) -> None:
-    """Show the currently known enemy combatants as distinct selectable targets."""
-    if not isinstance(combat, dict) or not combat.get("active"):
-        return
-    enemies = [
-        actor for actor in (combat.get("combatants") or [])
-        if isinstance(actor, dict) and actor.get("team") == "enemy"
-    ]
-    if not enemies:
-        return
-
-    entries = []
-    for enemy in enemies:
-        name = str(enemy.get("name") or "Enemy")
-        hp = int(enemy.get("hp", 0) or 0)
-        max_hp = int(enemy.get("max_hp", hp) or hp)
-        x, y = _position_xy(enemy)
-        status = "DEFEATED" if enemy.get("defeated") else f"{hp}/{max_hp} HP"
-        entries.append(f"{name}: {status} @ ({x}, {y})")
-
-    print("🎯 TARGETS")
-    print(" | ".join(entries))
+    enemies = [a for a in combatants if isinstance(a, dict) and a.get("team") == "enemy"]
+    if enemies:
+        entries = []
+        for enemy in enemies:
+            x, y = _position_xy(enemy)
+            status = "DEFEATED" if enemy.get("defeated") else f"{int(enemy.get('hp', 0))}/{int(enemy.get('max_hp', enemy.get('hp', 0)))} HP"
+            entries.append(f"{enemy.get('name', 'Enemy')}: {status} @ ({x}, {y})")
+        print("🎯 TARGETS")
+        print(" | ".join(entries))
 
 
 def _print_combat_results(results, combat=None) -> None:
@@ -111,97 +50,69 @@ def _print_combat_results(results, combat=None) -> None:
     for event in results:
         if not isinstance(event, dict):
             continue
-        event_type = event.get("type")
-        if event_type == "combat_start":
+        kind = event.get("type")
+        if kind == "combat_start":
             print("\n⚔️ COMBAT BEGINS")
             print("Initiative:", " → ".join(event.get("order", [])))
-        elif event_type in {"player_attack", "enemy_attack"}:
-            attacker = event.get("attacker", "Attacker")
-            target = event.get("target", "Target")
-            d20 = event.get("d20")
-            bonus = int(event.get("attack_bonus", 0))
-            total = event.get("attack_total")
-            ac = event.get("armor_class")
-            sign = "+" if bonus >= 0 else "-"
-            hit_text = "HIT" if event.get("hit") else "MISS"
-            print(f"\n⚔️ {attacker} attacks {target}")
-            print(f"d20: {d20} {sign} {abs(bonus)} = {total} vs AC {ac} — {hit_text}")
+        elif kind in {"player_attack", "enemy_attack"}:
+            hit = "HIT" if event.get("hit") else "MISS"
+            print(f"\n⚔️ {event.get('attacker')} attacks {event.get('target')}")
+            print(f"d20: {event.get('d20')} + {event.get('attack_bonus', 0)} = {event.get('attack_total')} vs AC {event.get('armor_class')} — {hit}")
             if event.get("hit"):
                 crit = " CRITICAL!" if event.get("critical") else ""
-                breakdown = _format_damage_breakdown(event)
-                print(
-                    f"Damage: {event.get('damage')} [{breakdown}] | {target} HP: "
-                    f"{event.get('target_hp')}/{event.get('target_max_hp')}{crit}"
-                )
-                if event.get("target_defeated"):
-                    print(f"{target} is defeated.")
-        elif event_type in {"player_ability", "enemy_ability"}:
-            actor = event.get("actor", "Combatant")
-            ability = event.get("ability", "Ability")
-            target = event.get("target", "Target")
-            before = int(event.get("resource_before", 0) or 0)
-            after = int(event.get("resource_after", 0) or 0)
-            cost = int(event.get("resource_cost", 0) or 0)
-            resource_name = str(event.get("resource_name") or "Resource")
-            print(f"\n✨ {actor} uses {ability} on {target}")
-            print(f"{resource_name}: {before} → {after} (cost {cost}) | Range: {event.get('distance')}/{event.get('range')}")
+                print(f"Damage: {event.get('damage')} | {event.get('target')} HP: {event.get('target_hp')}/{event.get('target_max_hp')}{crit}")
+        elif kind in {"player_ability", "enemy_ability"}:
+            print(f"\n✨ {event.get('actor')} uses {event.get('ability')} on {event.get('target')}")
+            print(f"{event.get('resource_name', 'Resource')}: {event.get('resource_before')} → {event.get('resource_after')} (cost {event.get('resource_cost', 0)})")
             if event.get("requires_attack_roll"):
-                bonus = int(event.get("attack_bonus", 0) or 0)
-                sign = "+" if bonus >= 0 else "-"
-                hit_text = "HIT" if event.get("hit") else "MISS"
-                print(f"d20: {event.get('d20')} {sign} {abs(bonus)} = {event.get('attack_total')} vs AC {event.get('armor_class')} — {hit_text}")
+                hit = "HIT" if event.get("hit") else "MISS"
+                print(f"d20: {event.get('d20')} + {event.get('attack_bonus', 0)} = {event.get('attack_total')} vs AC {event.get('armor_class')} — {hit}")
             if event.get("hit") and event.get("damage_rolls"):
                 crit = " CRITICAL!" if event.get("critical") else ""
-                breakdown = _format_damage_breakdown(event, first_label="Ability")
-                print(
-                    f"Damage: {event.get('damage')} [{breakdown}] | {target} HP: "
-                    f"{event.get('target_hp')}/{event.get('target_max_hp')}{crit}"
-                )
-            if event.get("target_defeated"):
-                print(f"{target} is defeated.")
-        elif event_type in {"player_defend", "enemy_defend"}:
-            bonus = int(event.get("defense_ac_bonus", 0) or 0)
-            score = int(event.get("defense_score", 0) or 0)
-            print(f"\n🛡️ {event.get('actor', 'Combatant')} DEFENDS — Defense {score} grants +{bonus} AC until next turn")
-        elif event_type == "player_end_turn":
+                print(f"Damage: {event.get('damage')} | {event.get('target')} HP: {event.get('target_hp')}/{event.get('target_max_hp')}{crit}")
+        elif kind in {"player_defend", "enemy_defend"}:
+            print(f"\n🛡️ {event.get('actor')} DEFENDS — +{event.get('defense_ac_bonus', 0)} AC")
+        elif kind == "player_end_turn":
             print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
-        elif event_type == "enemy_pass":
-            print(f"\n⚔️ {event.get('actor', 'Enemy')} takes no attack action.")
-        elif event_type == "invalid":
+        elif kind == "invalid":
             print(f"\n⚠️ COMBAT ACTION INVALID: {event.get('reason', 'Unknown reason')}")
-
-    _print_movement_hud(combat)
-    _print_target_hud(combat)
+    _print_combat_hud(combat)
 
 
 def main() -> None:
     print("=" * 48)
     print("THE SHATTERED REALMS — AI GAME MASTER")
     print("=" * 48)
-    print("Type anything your character attempts. Type 'quit' to stop.\n")
+    print("Type 'start game' to build a new character and begin a new adventure.")
+    print("Type anything else to continue the current campaign. Type 'quit' to stop.\n")
 
     game_master = GameMaster()
 
     while True:
         action = input("What do you do? ").strip()
-        if action.lower() in {"quit", "exit"}:
+        lowered = action.lower()
+        if lowered in {"quit", "exit"}:
             print("Campaign paused.")
             break
+        if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
+            created = run_character_creation(game_master)
+            player = created["player"]
+            print("\n" + "=" * 48)
+            print(f"{player.get('name')} — {player.get('class')}")
+            print(f"HP: {player.get('hp')}/{player.get('max_hp')} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
+            print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
+            print("=" * 48)
+            print("\n" + created.get("narration", "Your adventure begins.") + "\n")
+            continue
 
         result = game_master.handle_action(action)
         check = result.get("roll")
         if isinstance(check, dict) and check.get("rolls"):
             rolled = check["rolls"][0]
             modifier = int(check.get("modifier", 0))
-            total = check.get("total")
-            dc = check.get("dc")
-            outcome = str(check.get("outcome", "")).replace("_", " ").upper()
             sign = "+" if modifier >= 0 else "-"
-            print(
-                f"\n🎲 CHECK — {check.get('reason', 'Action')}\n"
-                f"d20: {rolled} {sign} {abs(modifier)} = {total} vs DC {dc}\n"
-                f"RESULT: {outcome}"
-            )
+            outcome = str(check.get("outcome", "")).replace("_", " ").upper()
+            print(f"\n🎲 CHECK — {check.get('reason', 'Action')}\nd20: {rolled} {sign} {abs(modifier)} = {check.get('total')} vs DC {check.get('dc')}\nRESULT: {outcome}")
 
         _print_combat_results(result.get("combat_results"), result.get("combat"))
         print("\n" + result.get("narration", "The world waits...") + "\n")
