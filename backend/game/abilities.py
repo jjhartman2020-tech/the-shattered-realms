@@ -1,8 +1,8 @@
 """Active ability resolution for The Shattered Realms combat prototype.
 
 Abilities are data-driven. The rules engine validates ownership, action cost,
-resources, range, target, attack rolls, damage, and cooldowns. AI narration
-never decides the mechanical result.
+class resources, range, target, attack rolls, and damage. AI narration never
+decides the mechanical result.
 """
 
 from typing import Dict
@@ -51,20 +51,19 @@ def resolve_ability(
         raise ValueError(f"{ability.get('name')} is not an active ability")
 
     name = str(ability.get("name") or ability_name)
-    resource = str(ability.get("resource") or "mana").lower()
-    resource_cost = max(0, int(ability.get("resource_cost", 0) or 0))
-    if resource != "mana":
-        raise ValueError(f"Prototype ability engine does not support {resource} yet")
-    current_resource = int(actor.get("mana", 0) or 0)
-    if current_resource < resource_cost:
-        raise ValueError(f"{actor_name} needs {resource_cost} mana for {name} but only has {current_resource}")
+    class_resource_name = str(actor.get("resource_name") or "Mana")
+    class_resource_key = str(actor.get("resource_type") or class_resource_name.lower().replace(" ", "_"))
+    requested_resource = str(ability.get("resource") or "class").strip().lower().replace(" ", "_")
+    if requested_resource not in {"class", class_resource_key}:
+        raise ValueError(f"{name} requires {ability.get('resource')} but {actor_name} uses {class_resource_name}")
 
-    current_round = int(combat.get("round", 1) or 1)
-    cooldowns = actor.setdefault("ability_cooldowns", {})
-    ready_round = int(cooldowns.get(name, 0) or 0)
-    if current_round < ready_round:
-        turns_remaining = ready_round - current_round
-        raise ValueError(f"{name} is on cooldown for {turns_remaining} more turn(s)")
+    resource_cost = max(0, int(ability.get("resource_cost", 0) or 0))
+    current_resource = int(actor.get("resource", actor.get("mana", 0)) or 0)
+    if current_resource < resource_cost:
+        raise ValueError(
+            f"{actor_name} needs {resource_cost} {class_resource_name} for {name} "
+            f"but only has {current_resource}"
+        )
 
     target_type = str(ability.get("target") or "enemy").lower()
     target = None
@@ -133,11 +132,10 @@ def resolve_ability(
         target["hp"] = max(0, int(target.get("hp", 0)) - damage)
         target["defeated"] = target["hp"] <= 0
 
-    actor["mana"] = current_resource - resource_cost
+    # A legal ability attempt spends the resource and primary action even if its attack roll misses.
+    actor["resource"] = current_resource - resource_cost
+    actor["mana"] = actor["resource"]  # backward-compatible alias
     actor["primary_action_used"] = True
-    cooldown_turns = max(0, int(ability.get("cooldown", 0) or 0))
-    if cooldown_turns:
-        cooldowns[name] = current_round + cooldown_turns + 1
 
     outcome = {
         "actor": actor_name,
@@ -146,10 +144,11 @@ def resolve_ability(
         "target_type": target_type,
         "distance": distance,
         "range": maximum_range,
-        "resource": resource,
+        "resource": class_resource_key,
+        "resource_name": class_resource_name,
         "resource_cost": resource_cost,
         "resource_before": current_resource,
-        "resource_after": int(actor.get("mana", 0)),
+        "resource_after": int(actor.get("resource", 0)),
         "attack_attribute": attack_attribute,
         "stat_accuracy_bonus": stat_bonus,
         "other_attack_bonus": other_bonus,
@@ -167,8 +166,6 @@ def resolve_ability(
         "physical_resistance_percent": resistance_percent,
         "damage": damage,
         "damage_rolls": damage_rolls,
-        "cooldown_turns": cooldown_turns,
-        "ready_round": cooldowns.get(name, current_round),
         "primary_action_used": True,
         "target_hp": int(target.get("hp", 0)),
         "target_max_hp": int(target.get("max_hp", target.get("hp", 0))),
