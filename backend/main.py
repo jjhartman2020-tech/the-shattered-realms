@@ -60,8 +60,9 @@ def _print_movement_hud(combat) -> None:
     movement_total = int(player.get("movement", 0) or 0)
     movement_used = int(player.get("movement_used", 0) or 0)
     movement_remaining = max(0, movement_total - movement_used)
-    mana = int(player.get("mana", 0) or 0)
-    max_mana = int(player.get("max_mana", mana) or mana)
+    resource_name = str(player.get("resource_name") or "Mana")
+    resource = int(player.get("resource", player.get("mana", 0)) or 0)
+    max_resource = int(player.get("max_resource", player.get("max_mana", resource)) or resource)
     x, y = _position_xy(player)
 
     order = combat.get("order") or []
@@ -76,7 +77,7 @@ def _print_movement_hud(combat) -> None:
     print(
         f"Round {round_number} | Position: ({x}, {y}) | "
         f"Movement: {movement_remaining}/{movement_total} remaining ({movement_used} used) | "
-        f"Mana: {mana}/{max_mana} | Action: {action_status} | Turn: {current_turn}{defending}"
+        f"{resource_name}: {resource}/{max_resource} | Action: {action_status} | Turn: {current_turn}{defending}"
     )
 
 
@@ -141,8 +142,9 @@ def _print_combat_results(results, combat=None) -> None:
             before = int(event.get("resource_before", 0) or 0)
             after = int(event.get("resource_after", 0) or 0)
             cost = int(event.get("resource_cost", 0) or 0)
+            resource_name = str(event.get("resource_name") or "Resource")
             print(f"\n✨ {actor} uses {ability} on {target}")
-            print(f"Mana: {before} → {after} (cost {cost}) | Range: {event.get('distance')}/{event.get('range')}")
+            print(f"{resource_name}: {before} → {after} (cost {cost}) | Range: {event.get('distance')}/{event.get('range')}")
             if event.get("requires_attack_roll"):
                 bonus = int(event.get("attack_bonus", 0) or 0)
                 sign = "+" if bonus >= 0 else "-"
@@ -155,9 +157,6 @@ def _print_combat_results(results, combat=None) -> None:
                     f"Damage: {event.get('damage')} [{breakdown}] | {target} HP: "
                     f"{event.get('target_hp')}/{event.get('target_max_hp')}{crit}"
                 )
-            cooldown = int(event.get("cooldown_turns", 0) or 0)
-            if cooldown:
-                print(f"Cooldown: {cooldown} turn(s)")
             if event.get("target_defeated"):
                 print(f"{target} is defeated.")
         elif event_type in {"player_defend", "enemy_defend"}:
