@@ -65,7 +65,6 @@ class GameState:
         self._migrate_player()
 
     def reset_for_new_campaign(self) -> None:
-        """Erase all prior campaign-specific state and persist a clean new-game state."""
         self.data = deepcopy(DEFAULT_STATE)
         self.save()
 
@@ -105,6 +104,8 @@ class GameState:
         for name in migrated:
             if name in skills: migrated[name] = int(skills.get(name, 0) or 0)
         player["skills"] = migrated
+        inventory = player.get("inventory")
+        if not isinstance(inventory, list): player["inventory"] = []
         if not completed:
             for key in ("unlocked_abilities", "equipped_abilities"):
                 items = player.get(key)
@@ -150,12 +151,41 @@ class GameState:
             actor.pop("ability_cooldowns", None); actors.append(actor)
         return {"combatants": actors, "grid": deepcopy(combat.get("grid", {})) if isinstance(combat, dict) else {}}
 
+    @staticmethod
+    def _add_inventory_item(player: Dict, raw_item: Dict) -> None:
+        if not isinstance(raw_item, dict): return
+        item = deepcopy(raw_item)
+        name = str(item.get("name") or "Item").strip() or "Item"
+        item_type = str(item.get("type") or "misc").strip().lower() or "misc"
+        item["name"] = name; item["type"] = item_type
+        try: quantity = max(1, int(item.get("quantity", 1) or 1))
+        except (TypeError, ValueError): quantity = 1
+        try: sell_value = max(0, int(item.get("sell_value", 0) or 0))
+        except (TypeError, ValueError): sell_value = 0
+        item["quantity"] = quantity; item["sell_value"] = sell_value
+        inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
+        player["inventory"] = inventory
+        stackable = item_type in {"misc", "material", "ingredient", "food", "consumable", "ammo", "resource", "flower", "herb"}
+        if stackable:
+            for existing in inventory:
+                if not isinstance(existing, dict): continue
+                if str(existing.get("name") or "").strip().lower() == name.lower() and str(existing.get("type") or "misc").strip().lower() == item_type:
+                    try: existing_qty = max(1, int(existing.get("quantity", 1) or 1))
+                    except (TypeError, ValueError): existing_qty = 1
+                    existing["quantity"] = existing_qty + quantity
+                    if "sell_value" not in existing: existing["sell_value"] = sell_value
+                    return
+        inventory.append(item)
+
     def apply_changes(self, changes: List[Dict]) -> None:
         if not isinstance(changes, list): changes = []
         for change in changes:
             if not isinstance(change, dict): continue
             kind = str(change.get("type") or "").strip().lower()
             if kind == "award_xp_orbs": self.award_xp_orbs(int(change.get("amount", 0) or 0)); continue
+            if kind == "add_inventory_item":
+                self._add_inventory_item(self.data.setdefault("player", {}), change.get("item") if isinstance(change.get("item"), dict) else {})
+                continue
             if kind == "set_encounter_enemies":
                 enemies = change.get("enemies")
                 if isinstance(enemies, list): self.data["pending_encounter_enemies"] = [deepcopy(e) for e in enemies if isinstance(e, dict)]
