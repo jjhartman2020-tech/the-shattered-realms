@@ -20,6 +20,21 @@ def _print_progress(player) -> None:
     print(f"Unspent SP: {int(player.get('skill_points_unspent', player.get('attribute_points_unspent', 0)) or 0)} | Stored AP: {int(player.get('ability_points', 0) or 0)}")
 
 
+def _print_suggested_actions(result) -> None:
+    if not isinstance(result, dict):
+        return
+    suggestions = result.get("suggested_actions")
+    if not isinstance(suggestions, list):
+        return
+    suggestions = [str(item).strip() for item in suggestions if str(item).strip()][:3]
+    if not suggestions:
+        return
+    print("Possible actions:")
+    for index, suggestion in enumerate(suggestions, 1):
+        print(f"  {index}. {suggestion}")
+    print("  Or type any other action you want.")
+
+
 def _print_combat_hud(combat) -> None:
     if not isinstance(combat, dict) or not combat.get("active"): return
     combatants = combat.get("combatants") or []
@@ -94,8 +109,6 @@ def main() -> None:
         if lowered in {"spend ap", "spend ability points", "learn ability", "learn abilities", "ability shop"}:
             player = run_ap_spending_screen(game_master); _print_progress(player); continue
         if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
-            # A true new game must not inherit any locations, items, NPCs, quests,
-            # encounters, or AI memories from the previous campaign.
             game_master.state.reset_for_new_campaign()
             game_master.memory.clear()
             print("\nStarting a completely fresh campaign. Previous campaign state and memory were cleared.")
@@ -109,7 +122,9 @@ def main() -> None:
             print(f"HP: {player.get('hp')}/{player.get('max_hp')} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
             _print_progress(player)
             print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
-            print("=" * 48); print("\n" + created.get("narration", "Your adventure begins.") + "\n"); continue
+            print("=" * 48); print("\n" + created.get("narration", "Your adventure begins.") + "\n")
+            _print_suggested_actions(created)
+            continue
 
         before_player = game_master.state.snapshot().get("player", {})
         before_level = int(before_player.get("level", 1) or 1)
@@ -125,6 +140,8 @@ def main() -> None:
             print("\n⬆️ LEVEL UP!"); _print_progress(after_player)
             print("Your SP and AP are stored. Spend them now or save them for later with 'spend sp' / 'spend ap'.")
         print("\n" + result.get("narration", "The world waits...") + "\n")
+        _print_suggested_actions(result)
+        print()
 
 
 if __name__ == "__main__":
