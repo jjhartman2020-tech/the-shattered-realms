@@ -29,10 +29,10 @@ DEFAULT_STATE = {
         "background": None, "species": None, "inspiration": 0,
         "attribute_points_unspent": 60, "ability_points": 0,
         "stats": {
-            "health": 0, "mana": 0, "strength": 0, "dexterity": 0, "constitution": 0,
+            "health": 0, "mana": 3, "strength": 0, "dexterity": 0, "constitution": 0,
             "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0, "defense": 0,
         },
-        "hp": 0, "max_hp": 0, "temporary_hp": 0, "mana": 0, "max_mana": 0,
+        "hp": 0, "max_hp": 0, "temporary_hp": 0, "mana": 3, "max_mana": 3,
         "armor_class": 10, "initiative_bonus": 0, "movement": 6,
         "saving_throw_proficiencies": [], "skill_proficiencies": [], "expertise": [],
         "skills": {"acrobatics": 0, "animal_handling": 0, "arcana": 0, "athletics": 0,
@@ -64,6 +64,68 @@ class GameState:
         saved = self._load()
         if saved: self._deep_merge(self.data, saved)
         if initial: self._deep_merge(self.data, deepcopy(initial))
+        self._migrate_prototype_player()
+
+    def _migrate_prototype_player(self) -> None:
+        """Bring legacy test saves forward without forcing a combat reset.
+
+        This migration is intentionally prototype-only. It gives the current test
+        character a small real Mana pool and equips Power Strike so an encounter
+        that was already in progress before the ability system existed can test
+        the new mechanics immediately.
+        """
+        player = self.data.setdefault("player", {})
+        stats = player.setdefault("stats", {})
+
+        # The current prototype needs a non-zero resource pool to exercise mana
+        # spending. Preserve any real higher value that already exists.
+        if int(stats.get("mana", 0) or 0) <= 0:
+            stats["mana"] = 3
+        if int(player.get("max_mana", 0) or 0) <= 0:
+            player["max_mana"] = int(stats.get("mana", 3) or 3)
+        if int(player.get("mana", 0) or 0) <= 0:
+            player["mana"] = int(player.get("max_mana", 3) or 3)
+
+        unlocked = player.get("unlocked_abilities")
+        if not isinstance(unlocked, list):
+            unlocked = []
+            player["unlocked_abilities"] = unlocked
+        equipped = player.get("equipped_abilities")
+        if not isinstance(equipped, list):
+            equipped = []
+            player["equipped_abilities"] = equipped
+
+        def has_power_strike(items: List[Dict]) -> bool:
+            return any(
+                isinstance(item, dict)
+                and str(item.get("name") or "").strip().lower() == "power strike"
+                for item in items
+            )
+
+        if not has_power_strike(unlocked):
+            unlocked.append(deepcopy(PROTOTYPE_POWER_STRIKE))
+        if not has_power_strike(equipped):
+            equipped.append(deepcopy(PROTOTYPE_POWER_STRIKE))
+
+        # Hot-sync the current player combatant so adding a prototype ability
+        # does not require throwing away an encounter that is already active.
+        combat = self.data.get("combat")
+        if isinstance(combat, dict) and combat.get("active"):
+            player_name = str(player.get("name") or "Traveler")
+            for actor in combat.get("combatants", []):
+                if not isinstance(actor, dict) or actor.get("name") != player_name:
+                    continue
+                actor["abilities"] = deepcopy(equipped)
+                actor_max_mana = int(actor.get("max_mana", 0) or 0)
+                if actor_max_mana <= 0:
+                    actor["max_mana"] = int(player.get("max_mana", 3) or 3)
+                actor_mana = int(actor.get("mana", 0) or 0)
+                if actor_mana <= 0:
+                    actor["mana"] = int(actor.get("max_mana", player.get("mana", 3)) or 3)
+                break
+
+        # Persist the migration so future runs do not depend on defaults alone.
+        self.save()
 
     def _load(self) -> Dict:
         if not self.path.exists(): return {}
