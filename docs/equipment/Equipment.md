@@ -1,6 +1,6 @@
 # Equipment.md
 
-Version: 1.0
+Version: 1.1
 Status: In Development
 
 ---
@@ -23,6 +23,8 @@ Status: In Development
 14. AI Generated Equipment
 15. Balance Philosophy
 16. Future Systems
+17. Exact Mechanical Display Rules
+18. Weapon Power and Resource-Cost Progression
 
 ---
 
@@ -33,64 +35,21 @@ Status: In Development
 - Equipment should feel rewarding to obtain.
 - Every piece of equipment should have a purpose.
 - Equipment should support multiple playstyles.
-- Better equipment should open new possibilities rather than simply increasing damage.
+- Better equipment should open new possibilities and may also become meaningfully stronger.
 - Equipment progression should reward exploration and difficult encounters.
+- The player must always be able to see the real mechanical values of an item before choosing, equipping, purchasing, or looting it.
 
 ---
 
 # 2. Equipment Types
 
-Equipment is divided into several categories.
-
-## Weapons
-
-Used to attack enemies.
-
----
-
-## Armor
-
-Provides protection and defensive bonuses.
-
----
-
-## Shields
-
-Increase survivability through blocking, resistances, and unique defensive effects.
-
----
-
-## Accessories
-
-Examples include:
-
-- Rings
-- Necklaces
-- Charms
-- Relics
-- Talismans
-
-Accessories provide passive bonuses and unique effects.
+Equipment is divided into Weapons, Armor, Shields, and Accessories.
 
 ---
 
 # 3. Equipment Slots
 
-Players may equip one item per slot.
-
-Default equipment slots include:
-
-- Main Hand
-- Off Hand
-- Helmet
-- Chest Armor
-- Gloves
-- Legs
-- Boots
-- Ring 1
-- Ring 2
-- Necklace
-- Charm
+Default equipment slots include Main Hand, Off Hand, Helmet, Chest Armor, Gloves, Legs, Boots, Ring 1, Ring 2, Necklace, and Charm.
 
 Future equipment slots may be added through special progression systems.
 
@@ -98,238 +57,160 @@ Future equipment slots may be added through special progression systems.
 
 # 4. Weapons
 
-Weapons determine:
+Weapons determine or display:
 
 - Base Damage
-- Damage Type
-- Attack Speed
+- Damage Type when relevant
 - Range
+- Attack Attribute
+- Resource Cost per attack when applicable
+- Special Effects
 - Ability Synergies
 
-Weapon examples:
+Weapon examples include swords, greatswords, daggers, spears, axes, hammers, bows, crossbows, staves, wands, scythes, whips, and dual weapons.
 
-- Swords
-- Greatswords
-- Daggers
-- Spears
-- Axes
-- Hammers
-- Bows
-- Crossbows
-- Staves
-- Wands
-- Scythes
-- Whips
-- Dual Weapons
+**Every weapon with a damaging attack must show its exact damage expression.** A sword may display `Damage 1d6`, a stronger sword may display `Damage 2d6`, and a magical weapon may additionally show its exact special effect.
 
-Different weapon types encourage different playstyles.
+Weapons may consume the user's class resource when attacked with. Resource Cost is defined per weapon. A simple starter weapon may cost 0 or a small amount, while stronger weapons may require larger amounts of the character's established class resource.
+
+If the character does not have enough current resource to pay a weapon's attack cost, that weapon may remain equipped but its resource-consuming attack cannot be used until the full cost can be paid.
 
 ---
 
 # 5. Armor
 
-Armor provides:
-
-- Defense
-- Damage Reduction
-- Resistances
-- Attribute Bonuses
-
-Armor categories include:
-
-- Cloth
-- Leather
-- Medium Armor
-- Heavy Armor
+Armor provides exact visible Defense, damage reduction, resistance, or other effects. Armor categories include Cloth, Leather, Medium Armor, and Heavy Armor.
 
 ---
 
 # 6. Shields
 
-Shields provide:
-
-- Block Chance
-- Damage Reduction
-- Knockback Resistance
-- Special Defensive Effects
-
-Some shields may grant active abilities.
+Shields may provide Block Chance, damage reduction, knockback resistance, Armor/Defense bonuses, or special defensive effects. Any numeric effect must be displayed exactly.
 
 ---
 
 # 7. Accessories
 
-Accessories provide passive bonuses.
-
-Examples include:
-
-- Increased Critical Chance
-- Mana Regeneration
-- Health Regeneration
-- Bonus Movement Speed
-- Elemental Resistance
-- Increased Experience Gain
-- Cooldown Reduction
-
-Legendary accessories may completely change gameplay.
+Accessories may provide passive bonuses such as increased critical chance, Resource regeneration, health regeneration, movement, elemental resistance, or other explicit effects.
 
 ---
 
 # 8. Equipment Rarity
 
-Equipment rarities include:
+Equipment rarities include Common, Uncommon, Rare, Epic, Legendary, and Mythic.
 
-- Common
-- Uncommon
-- Rare
-- Epic
-- Legendary
-- Mythic
-
-Higher rarity equipment generally has stronger effects, additional bonuses, and unique abilities.
+Higher rarity equipment generally has stronger effects, additional bonuses, and unique abilities, but rarity alone does not replace actual displayed stats.
 
 ---
 
 # 9. Attribute Requirements
 
-Equipment may require minimum attributes.
+Equipment may require minimum attributes. Attribute requirements use the current 0-100 attribute system defined in `Stats.md`.
 
-Examples:
-
-Greatsword
-
-- Strength 25
-
-Longbow
-
-- Dexterity 20
-
-Wizard Staff
-
-- Intelligence 30
-
-Heavy Armor
-
-- Constitution 25
-
-If attribute requirements are not met, equipment cannot be equipped.
+If attribute requirements are not met, the item cannot be equipped unless a specific rule explicitly overrides the requirement.
 
 ---
 
 # 10. Equipment Stats
 
-Equipment may provide:
+Equipment may provide Strength, Dexterity, Agility, Constitution, Intelligence, Wisdom, Charisma, Speed, Defense, Luck, Magic, Health, Resource, Critical Chance, damage bonuses, Armor, resistances, or unique passive effects.
 
-- Strength
-- Dexterity
-- Constitution
-- Intelligence
-- Wisdom
-- Charisma
-- Speed
-- Health
-- Mana
-- Critical Chance
-- Critical Damage
-- Armor
-- Elemental Resistance
-
-Equipment may also grant unique passive effects.
+Any stat or effect provided by equipment must be explicit and visible.
 
 ---
 
 # 11. Legendary Equipment
 
-Legendary equipment is among the rarest equipment in the game.
-
-Characteristics include:
-
-- Unique appearance
-- Unique lore
-- Powerful passive effects
-- Special abilities
-- Build-defining bonuses
-
-Legendary equipment should feel memorable and difficult to obtain.
+Legendary equipment is among the rarest equipment in the game and may have unique appearance, lore, powerful passive effects, special abilities, or build-defining mechanics.
 
 ---
 
 # 12. Set Bonuses
 
-Some equipment belongs to a set.
-
-Equipping multiple pieces from the same set grants additional bonuses.
-
-Examples:
-
-2 Pieces
-
-- +10% Health
-
-4 Pieces
-
-- Fire Resistance
-
-6 Pieces
-
-- Unique Passive Ability
-
-Set bonuses encourage long-term equipment goals without making them mandatory.
+Some equipment belongs to a set. Equipping multiple pieces from the same set grants additional bonuses. Every threshold and effect must state exact values.
 
 ---
 
 # 13. Durability
 
-Equipment durability is currently under consideration.
-
-Possible options include:
-
-- No durability system.
-- Equipment loses durability through combat.
-- Equipment can be repaired.
-- Legendary equipment may have unique durability rules.
+Equipment durability is currently under consideration and remains undecided.
 
 ---
 
 # 14. AI Generated Equipment
 
-The AI may generate completely unique equipment.
+The AI may generate completely unique equipment, but generated equipment must follow the same mechanical rules as handcrafted equipment.
 
-Generated equipment follows the same balancing rules as developer-created equipment.
-
-The AI determines:
+For every generated weapon the AI must determine:
 
 - Name
-- Appearance
+- Type
 - Description
 - Rarity
-- Stats
-- Passive Effects
-- Attribute Requirements
-- Value
+- Damage
+- Range
+- Attack Attribute
+- Resource Cost per attack when applicable
+- Special Effects
+- Attribute Requirements when applicable
+- Value when relevant
+
+Generated non-weapon equipment must similarly state exact bonuses or effects rather than vague descriptions.
 
 ---
 
 # 15. Balance Philosophy
 
-## Design Goals
-
 - No equipment should be mandatory.
 - Every weapon type should remain viable.
 - Every armor type should support different playstyles.
 - Equipment should reward experimentation.
-- Legendary equipment should feel powerful without making other equipment obsolete.
+- Early-game equipment should be deliberately weaker than later equipment.
+- Stronger weapons should normally demand greater investment through rarity, requirements, Resource Cost, risk, or other meaningful limitations.
 
 ---
 
 # 16. Future Systems
 
-Possible future additions:
+Possible future additions include Equipment Transmogrification, Cosmetic Skins, Weapon Mastery, Equipment Upgrading, Equipment Crafting, Socketed Gems, and a Rune System.
 
-- Equipment Transmogrification
-- Cosmetic Skins
-- Weapon Mastery
-- Equipment Upgrading
-- Equipment Crafting
-- Socketed Gems
-- Rune System
+---
+
+# 17. Exact Mechanical Display Rules
+
+Whenever the player views a weapon or other equipment option, the UI must display what it actually does.
+
+Examples:
+
+`Worn Iron Sword — Damage 1d6 | Range 1 | Cost 0 Trailmarks`
+
+`Riftsteel Saber — Damage 2d8 | Range 1 | Cost 20 Trailmarks | On hit: move 1 square without provoking`
+
+`Phase Bow — Damage 2d6 | Range 7 | Cost 15 Focus`
+
+`Traveler Boots — Movement +1 square`
+
+`Reinforced Buckler — Armor +1`
+
+Flavor text may be shown, but never instead of these mechanical values.
+
+---
+
+# 18. Weapon Power and Resource-Cost Progression
+
+Characters should begin with weak starter weapons. These weapons normally use small damage dice, short range, few or no special effects, and low Resource Costs.
+
+As the player explores, levels, defeats stronger enemies, crafts items, completes quests, and finds rarer loot, stronger weapons become available. Stronger weapons may have:
+
+- Larger damage expressions
+- Greater range
+- Stronger secondary effects
+- Multiple effects
+- Better target coverage
+- Stronger scaling
+
+Those improvements should generally be paired with higher Resource Costs, tougher requirements, higher rarity, or another meaningful limitation.
+
+A weapon may be acquired and equipped even when its Resource Cost is currently impossible for the character to pay, provided its normal attribute/equipment requirements are met. The player simply cannot use its resource-consuming attack until enough current resource is available.
+
+This creates long-term progression where discovering an extremely powerful weapon can become a future build goal rather than forcing the game to hide the item until the character is already strong enough to use it.
