@@ -1,13 +1,13 @@
 # Stats.md
 
-Version: 2.0
+Version: 2.1
 Status: In Development
 
 ---
 
 # 1. Stat Philosophy
 
-The Shattered Realms uses twelve core attributes. Players spend Attribute Points (AP) directly on these attributes.
+The Shattered Realms uses thirteen core attributes. Players spend Attribute Points (AP) directly on these attributes.
 
 Design goals:
 
@@ -22,7 +22,7 @@ Design goals:
 
 # 2. Core Attributes
 
-The twelve core attributes are:
+The thirteen core attributes are:
 
 1. Health
 2. Resource
@@ -36,10 +36,11 @@ The twelve core attributes are:
 10. Speed
 11. Defense
 12. Luck
+13. Magic
 
 ## Character Creation
 
-Every new character begins with **30 Attribute Points** to distribute among the twelve core attributes.
+Every new character begins with **42 Attribute Points** to distribute among the thirteen core attributes.
 
 The player chooses their own name, appearance, and starting attribute allocation. After the player confirms the build, the AI may use the confirmed build and appearance to generate the character's unique class, class-resource name, backstory, beginner ability choices, and starter equipment choices as defined by the character-creation system.
 
@@ -55,7 +56,7 @@ Equipment, buffs, blessings, artifacts, abilities, and special world effects may
 
 # 4. Standard Attribute Modifier
 
-Strength, Dexterity, Agility, Constitution, Intelligence, Wisdom, Charisma, Speed, Defense, and Luck use the standard modifier when a d20 check or another mechanic calls for that attribute's modifier.
+Strength, Dexterity, Agility, Constitution, Intelligence, Wisdom, Charisma, Speed, Defense, Luck, and Magic use the standard modifier when a d20 check or another mechanic calls for that attribute's modifier.
 
 ## 0-30 Scaling
 
@@ -257,14 +258,23 @@ Equipment, abilities, conditions, and special effects may modify these values se
 
 # 11. Intelligence
 
-Intelligence represents reasoning, technical knowledge, learned expertise, investigation, and arcane understanding.
+Intelligence represents reasoning, technical knowledge, learned expertise, investigation, engineering knowledge, and understanding of magical theory.
 
 Intelligence uses the standard attribute modifier:
 
 - +1 per full 3 Intelligence through 30.
 - After 30, +1 per full 10 additional Intelligence.
 
-Intelligence-based skills, abilities, requirements, and checks use this modifier when appropriate.
+Intelligence is intended for mechanics and skills such as:
+
+- Investigation
+- Engineering
+- Arcane and magical knowledge
+- History and learned knowledge
+- Technical problem-solving
+- Intelligence-based abilities and requirements
+
+**Intelligence represents understanding magic; it does not determine raw magical power. Raw magical power is governed by Magic.**
 
 ---
 
@@ -398,7 +408,37 @@ Luck does **not** automatically increase loot rarity. Explicit Luck checks or ab
 
 ---
 
-# 17. Attribute Requirements
+# 17. Magic
+
+Magic represents raw magical power, magical control, and the character's ability to actively wield supernatural forces.
+
+Magic uses the standard attribute modifier:
+
+- +1 per full 3 Magic through 30.
+- After 30, +1 per full 10 additional Magic.
+
+Magic is intended for mechanics such as:
+
+- Magic-based attack accuracy
+- Spell and magical ability power
+- Magical damage scaling when an ability uses Magic
+- Magical healing or support scaling when an ability uses Magic
+- Controlling unstable magical effects
+- Opposing or overpowering magical forces
+- Requirements for spells, magical abilities, magical weapons, focuses, and artifacts
+- Magic-based ability scaling and checks
+
+Magic, Intelligence, and Resource have separate identities:
+
+- **Intelligence** = knowledge and understanding, including magical theory and engineering.
+- **Magic** = raw magical power and control.
+- **Resource** = the size and regeneration of the class-resource pool used to pay ability costs.
+
+A character may therefore understand magic extremely well without being powerful at casting it, or possess enormous magical power without deep theoretical knowledge.
+
+---
+
+# 18. Attribute Requirements
 
 Raw attribute values may be used as requirements for weapons, armor, shields, abilities, equipment, dialogue options, environmental interactions, and other systems.
 
@@ -406,13 +446,14 @@ Requirements should be visible or logically discoverable to the player when rele
 
 ---
 
-# 18. Derived Systems Still To Finalize
+# 19. Derived Systems Still To Finalize
 
 The following systems will be finalized in their own documentation and then cross-checked against this file:
 
-- Skill list and attribute-to-skill mapping
+- Skill list and attribute-to-skill mapping, including Engineering under Intelligence and magical-use skills under Magic where appropriate
 - Passive Armor Class formula
 - Strength physical-damage scaling beyond the d20 modifier
+- Magic damage/healing scaling beyond the d20 modifier
 - Equipment requirements and scaling
 - Ability scaling and resource costs
 - Level progression and maximum level
