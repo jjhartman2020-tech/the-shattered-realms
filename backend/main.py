@@ -1,6 +1,7 @@
 """Command-line entry point for testing The Shattered Realms runtime."""
 
 from backend.ai.game_master import GameMaster
+from backend.game.world_creation import run_world_creation
 from backend.game.character_creation import run_character_creation
 from backend.game.level_up import run_spending_screen
 from backend.game.ability_learning import run_ap_spending_screen
@@ -77,7 +78,7 @@ def _print_combat_results(results, combat=None) -> None:
 
 def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
-    print("Type 'start game' to build a new character.")
+    print("Type 'start game' to create a world, build a character, and begin a new adventure.")
     print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
     print("Type 'spend sp' to upgrade stats. Type 'spend ap' to learn abilities. Type 'quit' to stop.\n")
     game_master = GameMaster()
@@ -89,16 +90,16 @@ def main() -> None:
         if lowered == "progress":
             _print_progress(game_master.state.snapshot().get("player", {})); continue
         if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
-            player = run_spending_screen(game_master)
-            _print_progress(player)
-            continue
+            player = run_spending_screen(game_master); _print_progress(player); continue
         if lowered in {"spend ap", "spend ability points", "learn ability", "learn abilities", "ability shop"}:
-            player = run_ap_spending_screen(game_master)
-            _print_progress(player)
-            continue
+            player = run_ap_spending_screen(game_master); _print_progress(player); continue
         if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
+            world = run_world_creation(game_master)
+            print(f"\nWorld confirmed: {world.get('name', 'Your World')}")
+            print("Now create the character who will live in it.\n")
             created = run_character_creation(game_master); player = created["player"]
             print("\n" + "=" * 48); print(f"{player.get('name')} — {player.get('class')}")
+            print(f"World: {world.get('name', 'Custom World')}")
             print(f"HP: {player.get('hp')}/{player.get('max_hp')} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
             _print_progress(player)
             print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
