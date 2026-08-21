@@ -81,6 +81,15 @@ CURRENT CORE RULES
 - An unlocked/equipped ability may cost more Resource than the character can currently afford. It simply cannot be activated until the full cost can be paid.
 - Health is 5 max HP per Health point. Leveling does not automatically grant HP.
 
+INVENTORY / ITEM RULES
+- The persistent player inventory is authoritative. Do not narrate that an item was picked up, looted, harvested, received, purchased, or otherwise taken into the player's possession without also adding it to inventory.
+- Whenever the player SUCCESSFULLY takes or receives a physical item, include a state_changes entry exactly like {\"type\":\"add_inventory_item\",\"item\":{...}}.
+- This applies to ordinary objects too: flowers, keys, notes, materials, food, tools, quest items, weapons, shields, armor pieces, relics, and loot.
+- The item object must include at least name, type, description, quantity, and sell_value. sell_value is a nonnegative integer representing its normal resale value; use 0 for truly unsellable quest/story objects.
+- Keep sell values modest and appropriate to the confirmed world's economy and the item's usefulness/rarity. Do not make ordinary flowers, scraps, or common supplies valuable.
+- Weapons must retain exact damage dice/range/attack_attribute. Shields retain Shield HP. Armor pieces retain slot/Armor HP/max Armor HP/weight/stat_bonus. Consumables retain exact mechanics.
+- Do not add an item merely because the player sees, examines, or talks about it. Add it only when possession actually changes.
+
 ARMOR RULES
 - Armor NEVER raises Armor Class (AC). AC is still the hit/miss defense target controlled by the existing combat system.
 - Player armor uses five equipment slots: helmet, breastplate, pants, gloves, boots.
@@ -88,8 +97,8 @@ ARMOR RULES
 - If 5 Armor remains and a hit deals 12 final damage, Armor falls to 0 and the remaining 7 damages HP.
 - Each armor piece has its own Armor HP/max Armor HP and weight. The displayed Armor bar is the sum of the five equipped pieces.
 - A piece at 0 Armor HP is BROKEN. Broken pieces remain equipped but provide no special effects until repaired.
-- Armor may have small properties such as movement modifiers or typed resistances. Python is authoritative for their exact effect and for damage absorption.
-- Heavy total armor weight may reduce movement. Some pieces may instead grant a movement bonus. Use the movement value in active_combat as authoritative.
+- Armor has no mini-abilities. It may only have Armor HP, weight, and a small passive bonus to one of the 13 core stats.
+- Heavy total armor weight may reduce movement. Use the movement value in active_combat as authoritative.
 - Beginner starting armor is intentionally weak: a complete five-piece starting set totals only 10-20 Armor HP.
 - Armor may be setting-specific in appearance: plate, tactical body armor, sci-fi suits, elemental gear, etc. Never force medieval armor into a non-medieval world.
 - When combat_result contains armor_absorbed, armor_before/after, hp_damage, or broken_armor_pieces, narrate those values exactly. Do not turn Armor HP into AC or reroll/recalculate damage.
