@@ -15,13 +15,8 @@ class DevelopmentProvider:
         action = context.get("player_action", "").strip()
         return {
             "narration": "The Game Master core received your action and assembled the campaign context. Set OPENAI_API_KEY to enable the live AI.",
-            "player_action": action,
-            "requires_roll": False,
-            "roll": None,
-            "combat_request": None,
-            "state_changes": [],
-            "memories": [],
-            "world_notes": [],
+            "player_action": action, "requires_roll": False, "roll": None, "combat_request": None,
+            "state_changes": [], "memories": [], "world_notes": [],
             "suggested_actions": [
                 {"text": "Look around", "requires_roll": False, "skill": None},
                 {"text": "Talk to someone nearby", "requires_roll": True, "skill": "charisma"},
@@ -86,6 +81,19 @@ CURRENT CORE RULES
 - An unlocked/equipped ability may cost more Resource than the character can currently afford. It simply cannot be activated until the full cost can be paid.
 - Health is 5 max HP per Health point. Leveling does not automatically grant HP.
 
+ARMOR RULES
+- Armor NEVER raises Armor Class (AC). AC is still the hit/miss defense target controlled by the existing combat system.
+- Player armor uses five equipment slots: helmet, breastplate, pants, gloves, boots.
+- Equipped armor creates a separate Armor HP bar. Damage is applied to Armor HP first; only overflow reaches real HP.
+- If 5 Armor remains and a hit deals 12 final damage, Armor falls to 0 and the remaining 7 damages HP.
+- Each armor piece has its own Armor HP/max Armor HP and weight. The displayed Armor bar is the sum of the five equipped pieces.
+- A piece at 0 Armor HP is BROKEN. Broken pieces remain equipped but provide no special effects until repaired.
+- Armor may have small properties such as movement modifiers or typed resistances. Python is authoritative for their exact effect and for damage absorption.
+- Heavy total armor weight may reduce movement. Some pieces may instead grant a movement bonus. Use the movement value in active_combat as authoritative.
+- Beginner starting armor is intentionally weak: a complete five-piece starting set totals only 10-20 Armor HP.
+- Armor may be setting-specific in appearance: plate, tactical body armor, sci-fi suits, elemental gear, etc. Never force medieval armor into a non-medieval world.
+- When combat_result contains armor_absorbed, armor_before/after, hp_damage, or broken_armor_pieces, narrate those values exactly. Do not turn Armor HP into AC or reroll/recalculate damage.
+
 CHECK RULES
 - Ordinary uncontested actions do not need rolls. Risky, contested, uncertain non-combat actions whose success matters require a check.
 - On the first pass, if a check is needed, set requires_roll=true and choose the most appropriate skill, governing core attribute, and difficulty from trivial, easy, standard, hard, very_hard, extreme. Never invent the die result.
@@ -102,7 +110,7 @@ CHECK RULES
 - When context contains mechanical_result, obey Python's result exactly.
 
 COMBAT RULES
-- Python owns initiative, positions, movement, actions, defense, resources, range, attacks, HP, damage, crits, defeat, and turn progression. Never silently alter these.
+- Python owns initiative, positions, movement, actions, defense, resources, range, attacks, HP, Armor HP, damage, crits, defeat, and turn progression. Never silently alter these.
 - Each combatant normally has one primary action per turn. Movement uses a separate budget.
 - Basic attack, Defend, and normal active abilities consume the primary action unless stored data says otherwise.
 - Defend uses the stored Defense stat/modifier. Never replace it with a flat value.
@@ -146,15 +154,13 @@ When requires_roll=true, roll contains reason, difficulty, skill, and attribute 
         result.setdefault("world_notes", [])
 
         suggestions = result.get("suggested_actions")
-        if not isinstance(suggestions, list):
-            suggestions = []
+        if not isinstance(suggestions, list): suggestions = []
         allowed_preview_stats = {"health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"}
         normalized = []
         for item in suggestions[:3]:
             if isinstance(item, dict):
                 text = str(item.get("text") or "").strip()
-                if not text:
-                    continue
+                if not text: continue
                 requires_roll = bool(item.get("requires_roll", False))
                 stat = str(item.get("skill") or item.get("attribute") or "").strip().lower().replace("_", " ") or None
                 if not requires_roll:
@@ -170,16 +176,14 @@ When requires_roll=true, roll contains reason, difficulty, skill, and attribute 
                 normalized.append({"text": text, "requires_roll": requires_roll, "skill": stat})
             else:
                 text = str(item).strip()
-                if text:
-                    normalized.append({"text": text, "requires_roll": False, "skill": None})
+                if text: normalized.append({"text": text, "requires_roll": False, "skill": None})
         result["suggested_actions"] = normalized
         result["debug"] = {"provider": "openai", "model": self.model, "rules_found": len(context.get("relevant_rules", [])), "memories_found": len(context.get("relevant_memories", []))}
         return result
 
 
 def provider_from_environment() -> AIProvider:
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        return OpenAIProvider()
+    if os.getenv("OPENAI_API_KEY", "").strip(): return OpenAIProvider()
     return DevelopmentProvider()
 
 
