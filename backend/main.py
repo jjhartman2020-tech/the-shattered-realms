@@ -30,10 +30,41 @@ def _preview_stat(item: dict) -> str:
     return raw.title() if raw in allowed else "Core Stat"
 
 
-def _print_suggested_actions(result) -> None:
+def _ability_from_text(text: str, player: dict | None):
+    if not isinstance(player, dict): return None
+    lowered = text.lower()
+    for ability in player.get("equipped_abilities", []) if isinstance(player.get("equipped_abilities"), list) else []:
+        if not isinstance(ability, dict): continue
+        name = str(ability.get("name") or "").strip()
+        if name and name.lower() in lowered: return ability
+    return None
+
+
+def _combat_action_preview(text: str, player: dict | None) -> str | None:
+    """Use real combat mechanics for option previews instead of non-combat roll metadata."""
+    lowered = text.lower()
+    ability = _ability_from_text(text, player)
+    if ability is not None:
+        if bool(ability.get("requires_attack_roll", False)):
+            stat = str(ability.get("attack_attribute") or ability.get("damage_bonus_attribute") or "magic").replace("_", " ").title()
+            return f" [ATTACK ROLL: {stat}]"
+        return " [NO ATTACK ROLL]"
+
+    attack_words = ("attack", "strike", "shoot", "slash", "stab", "swing", "hit ", "fire at", "blast", "punch", "kick")
+    weapon = player.get("equipped_weapon") if isinstance(player, dict) and isinstance(player.get("equipped_weapon"), dict) else {}
+    weapon_name = str(weapon.get("name") or "").strip().lower()
+    if any(word in lowered for word in attack_words) or (weapon_name and weapon_name in lowered):
+        stat = str(weapon.get("attack_attribute") or player.get("attack_attribute") or "strength").replace("_", " ").title() if isinstance(player, dict) else "Strength"
+        return f" [ATTACK ROLL: {stat}]"
+    return None
+
+
+def _print_suggested_actions(result, player_state: dict | None = None) -> None:
     if not isinstance(result, dict): return
     suggestions = result.get("suggested_actions")
     if not isinstance(suggestions, list) or not suggestions: return
+    combat = result.get("combat")
+    combat_active = isinstance(combat, dict) and bool(combat.get("active"))
     print("Possible actions:")
     shown = 0
     for item in suggestions:
@@ -41,17 +72,39 @@ def _print_suggested_actions(result) -> None:
         if isinstance(item, dict):
             text = str(item.get("text") or "").strip()
             if not text: continue
-            preview = f" [ROLL: {_preview_stat(item)}]" if bool(item.get("requires_roll", False)) else " [NO ROLL EXPECTED]"
+            combat_preview = _combat_action_preview(text, player_state) if combat_active else None
+            if combat_preview is not None:
+                preview = combat_preview
+            elif combat_active:
+                preview = " [NO ATTACK ROLL]"
+            else:
+                preview = f" [ROLL: {_preview_stat(item)}]" if bool(item.get("requires_roll", False)) else " [NO ROLL EXPECTED]"
         else:
             text = str(item).strip()
             if not text: continue
-            preview = ""
+            preview = _combat_action_preview(text, player_state) if combat_active else ""
+            if combat_active and preview is None: preview = " [NO ATTACK ROLL]"
         shown += 1
         print(f"  {shown}. {text}{preview}")
     if shown: print("  Or type any other action you want.")
 
 
-def _print_combat_hud(combat) -> None:
+def _ability_summary(ability: dict, resource_name: str) -> str:
+    parts = []
+    if ability.get("damage"): parts.append(f"Damage {ability.get('damage')}")
+    if ability.get("healing"): parts.append(f"Healing {ability.get('healing')}")
+    if ability.get("shield"): parts.append(f"Shield {ability.get('shield')}")
+    if ability.get("movement") is not None: parts.append(f"Move {ability.get('movement')} squares")
+    if ability.get("range") is not None: parts.append(f"Range {ability.get('range')}")
+    cost = ability.get("resource_cost", ability.get("cost"))
+    if cost is not None: parts.append(f"Cost {cost} {resource_name}")
+    description = str(ability.get("description") or ability.get("effect") or "").strip()
+    mechanics = " | ".join(parts)
+    if description: return f"{mechanics} — {description}" if mechanics else description
+    return mechanics or "No description"
+
+
+def _print_combat_hud(combat, player_state: dict | None = None) -> None:
     if not isinstance(combat, dict) or not combat.get("active"): return
     combatants = combat.get("combatants") or []
     player = next((a for a in combatants if isinstance(a, dict) and a.get("team") == "player"), None)
@@ -69,8 +122,29 @@ def _print_combat_hud(combat) -> None:
         turn = order[index] if order and 0 <= index < len(order) else "Unknown"
         defending = f" | Defending +{int(player.get('active_defense_ac_bonus', 0) or 0)} AC" if player.get("defending") else ""
         shield_text = f" | Shield: {shield}/{max_shield}" if max_shield > 0 else ""
-        print("\n🏃 MOVEMENT HUD")
+        print("\n🏃 COMBAT HUD")
         print(f"Round {combat.get('round', 1)} | Position: ({x}, {y}) | Movement: {max(0, movement-used)}/{movement} | HP: {hp}/{max_hp}{shield_text} | Armor: {armor}/{max_armor} | {resource_name}: {resource}/{max_resource} | Action: {action} | Turn: {turn}{defending}")
+
+        persistent = player_state if isinstance(player_state, dict) else {}
+        weapon = persistent.get("equipped_weapon") if isinstance(persistent.get("equipped_weapon"), dict) else None
+        if weapon:
+            weapon_name = str(weapon.get("name") or "Weapon")
+            damage = str(weapon.get("damage") or player.get("damage") or "?")
+            attack_stat = str(weapon.get("attack_attribute") or player.get("attack_attribute") or "strength").title()
+            range_value = weapon.get("range")
+            range_text = f" | Range {range_value}" if range_value is not None else ""
+            print(f"🗡️ WEAPON: {weapon_name} | Damage {damage}{range_text} | Attack stat: {attack_stat}")
+        else:
+            print(f"🗡️ WEAPON: Basic attack | Damage {player.get('damage', '?')}")
+
+        abilities = persistent.get("equipped_abilities") if isinstance(persistent.get("equipped_abilities"), list) else player.get("abilities", [])
+        print("✨ ABILITIES:")
+        if isinstance(abilities, list) and abilities:
+            for ability in abilities:
+                if isinstance(ability, dict): print(f"  - {ability.get('name', 'Ability')}: {_ability_summary(ability, resource_name)}")
+        else:
+            print("  - None equipped")
+
     enemies = [a for a in combatants if isinstance(a, dict) and a.get("team") == "enemy"]
     if enemies:
         entries = []
@@ -102,7 +176,7 @@ def _print_damage_result(event: dict) -> None:
         print(f"Damage: {damage} | Target HP: {event.get('target_hp')}/{event.get('target_max_hp')}{crit}")
 
 
-def _print_combat_results(results, combat=None) -> None:
+def _print_combat_results(results, combat=None, player_state: dict | None = None) -> None:
     if not isinstance(results, list): return
     for event in results:
         if not isinstance(event, dict): continue
@@ -125,7 +199,7 @@ def _print_combat_results(results, combat=None) -> None:
             print(f"\n🛡️ {event.get('actor')} DEFENDS — +{event.get('defense_ac_bonus', 0)} AC")
         elif kind == "player_end_turn": print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
         elif kind == "invalid": print(f"\n⚠️ COMBAT ACTION INVALID: {event.get('reason', 'Unknown reason')}")
-    _print_combat_hud(combat)
+    _print_combat_hud(combat, player_state)
 
 
 def _format_check_sources(check) -> str:
@@ -181,7 +255,7 @@ def main() -> None:
             _print_progress(player)
             print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
             print("=" * 48); print("\n" + created.get("narration", "Your adventure begins.") + "\n")
-            _print_suggested_actions(created)
+            _print_suggested_actions(created, player)
             continue
 
         before_player = game_master.state.snapshot().get("player", {})
@@ -200,13 +274,13 @@ def main() -> None:
             print(f"Using: {check_label}" + (f" ({attribute})" if skill and attribute else ""))
             print(f"d20: {rolled} {sign} {abs(modifier)}{source_text} = {check.get('total')} vs DC {check.get('dc')}")
             print(f"RESULT: {outcome}")
-        _print_combat_results(result.get("combat_results"), result.get("combat"))
         after_player = game_master.state.snapshot().get("player", {})
+        _print_combat_results(result.get("combat_results"), result.get("combat"), after_player)
         if int(after_player.get("level", 1) or 1) > before_level:
             print("\n⬆️ LEVEL UP!"); _print_progress(after_player)
             print("Your SP and AP are stored. Spend them now or save them for later with 'spend sp' / 'spend ap'.")
         print("\n" + result.get("narration", "The world waits...") + "\n")
-        _print_suggested_actions(result); print()
+        _print_suggested_actions(result, after_player); print()
 
 
 if __name__ == "__main__":
