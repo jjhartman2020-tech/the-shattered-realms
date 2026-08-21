@@ -1,6 +1,6 @@
 # Abilities.md
 
-Version: 1.1
+Version: 1.2
 Status: In Development
 
 ---
@@ -26,6 +26,8 @@ Status: In Development
 17. Targeting Rules
 18. Ability Interactions
 19. Ability Templates
+20. Exact Mechanical Display Rules
+21. Power and Resource-Cost Progression
 
 # 1. Ability Philosophy
 
@@ -37,6 +39,7 @@ Status: In Development
 - Every class should support multiple viable builds.
 - Abilities should reward long-term planning.
 - Powerful abilities should feel like major accomplishments to unlock.
+- The player should always be able to see exactly what an ability mechanically does before choosing or equipping it.
 
 ---
 
@@ -46,19 +49,13 @@ Status: In Development
 
 Abilities activated by the player during combat.
 
----
-
 ## Passive Abilities
 
 Always active abilities that provide permanent bonuses or effects.
 
----
-
 ## Ultimate Abilities
 
 Extremely powerful abilities with significant resource costs and/or explicit special restrictions.
-
----
 
 ## Utility Abilities
 
@@ -68,21 +65,9 @@ Abilities focused on exploration, movement, stealth, survival, crafting, dialogu
 
 # 3. Ability Points
 
-## Earning Ability Points
+Players gain +1 Ability Point every level unless the progression system is later revised.
 
-Players gain:
-
-- +1 Ability Point every level.
-
-Unused Ability Points may be saved and spent later.
-
----
-
-## Spending Ability Points
-
-Ability Points are used to permanently unlock new abilities.
-
-Every ability has its own Ability Point cost based on its power.
+Unused Ability Points may be saved and spent later. Ability Points permanently unlock abilities; they do not pay the combat Resource Cost of using an ability.
 
 ---
 
@@ -94,7 +79,9 @@ Abilities may require:
 - Attribute Requirements
 - Ability Point Cost
 
-All attribute requirements use the game's current 0-30 attribute scale.
+Attribute requirements use the current 0-100 attribute system in `Stats.md`.
+
+A character may unlock and equip an ability even when their current maximum class resource is lower than that ability's Resource Cost, unless the ability has another explicit equip restriction. However, that ability cannot be activated until the character can actually pay the full Resource Cost.
 
 ---
 
@@ -107,8 +94,8 @@ All abilities are visible from Level 1.
 Locked abilities display:
 
 - Description
-- Effects
-- Damage
+- Exact Effects
+- Damage, healing, movement, shielding, duration, range, targets, or other numeric values
 - Resource Cost
 - Special Restrictions, if any
 - Attribute Requirements
@@ -125,45 +112,28 @@ Players cannot equip every unlocked ability at once.
 Default slots:
 
 - 4 Active Ability Slots
-- Unlimited Passive Abilities (unless otherwise specified)
+- Unlimited Passive Abilities unless otherwise specified
 - 1 Ultimate Ability Slot
 
 Players may freely change equipped abilities outside of combat.
+
+**Equipping an ability does not require the player to currently have enough maximum resource to use it.** An under-resourced ability may remain equipped but is unavailable for activation until its full cost can be paid.
 
 ---
 
 # 7. Active Abilities
 
-Examples include:
-
-- Melee Attacks
-- Magic
-- Healing
-- Buffs
-- Debuffs
-- Mobility
-- Crowd Control
-- Summoning
-- Defensive Skills
+Examples include melee attacks, magic, healing, buffs, debuffs, mobility, crowd control, summoning, and defensive skills.
 
 Using an active ability normally consumes the character's primary action unless the ability explicitly says otherwise.
 
-Normal active abilities do **not** use a universal cooldown system. If the character has enough of the required class resource and an available action, the ability may be used again on a later turn.
+Normal active abilities do not use a universal cooldown system. If the character has enough required class resource and an available action, the ability may be used again on a later turn.
 
 ---
 
 # 8. Passive Abilities
 
-Examples include:
-
-- Increased Damage
-- Faster Movement
-- Increased Critical Chance
-- Reduced Resource Cost
-- Better Stealth
-- Improved Defense
-- Better Crafting
-- Improved Persuasion
+Examples include increased damage, faster movement, increased critical chance, reduced Resource Cost, better stealth, improved defense, better crafting, and improved persuasion.
 
 Passive abilities remain active at all times unless disabled by another effect.
 
@@ -173,15 +143,7 @@ Passive abilities remain active at all times unless disabled by another effect.
 
 Ultimate abilities are among the strongest abilities available.
 
-Characteristics may include:
-
-- High Ability Point Cost
-- High Attribute Requirements
-- Powerful Effects
-- Significant Resource Costs
-- Explicit Special Restrictions
-
-Every class has multiple Ultimate abilities to choose from.
+Characteristics may include high Ability Point Cost, high attribute requirements, powerful effects, significant Resource Costs, and explicit special restrictions.
 
 ---
 
@@ -189,48 +151,19 @@ Every class has multiple Ultimate abilities to choose from.
 
 Abilities consume the user's class resource.
 
-Default examples include:
+The core capacity stat is **Resource** in `Stats.md`. The actual displayed pool name is class-specific or AI-generated, such as Mana, Stamina, Rage, Focus, Energy, Ki, Divine Power, Shadow Energy, Trailmarks, or another established class resource.
 
-- Mana
-- Stamina
-- Rage
-- Focus
-- Energy
-- Ki
-- Divine Power
-- Shadow Energy
+`Maximum Class Resource = floor(Resource / 2) x 10`
 
-Each class has one primary resource defined in `Classes.md`.
+The player cannot activate an ability without enough current resource to pay its complete Resource Cost. The ability may still remain unlocked and equipped. An invalid attempt caused by insufficient resource spends no resource and no primary action.
 
-Unless an ability explicitly states otherwise, its Resource Cost is paid from the user's primary class-resource pool.
-
-The **Mana attribute** in `Stats.md` determines the maximum size of that pool regardless of the pool's displayed name:
-
-`Maximum Class Resource = floor(Mana / 2) x 10`
-
-For example, a Warrior with Mana 10 has 50 Stamina, while a Mage with Mana 10 has 50 Mana.
-
-Players cannot use an ability without sufficient resources. An invalid ability attempt does not spend the resource or primary action.
+Resource Cost is one of the game's main balancing tools. A stronger ability should generally cost more than a weaker ability that fills the same role.
 
 ---
 
 # 11. Ability Categories
 
-Abilities may belong to one or more categories.
-
-Examples include:
-
-- Offensive
-- Defensive
-- Healing
-- Mobility
-- Summoning
-- Stealth
-- Support
-- Crowd Control
-- Utility
-
-Categories help players organize and search their abilities.
+Abilities may belong to Offensive, Defensive, Healing, Mobility, Summoning, Stealth, Support, Crowd Control, Utility, or other clear categories.
 
 ---
 
@@ -238,150 +171,73 @@ Categories help players organize and search their abilities.
 
 Custom classes automatically generate balanced abilities.
 
-Every generated ability follows the same balancing rules as developer-created abilities.
+Every generated ability follows the same rules as developer-created abilities. The AI determines the name, description, exact effects, Resource Cost, Ability Point Cost, attribute requirements, and any genuine special restrictions.
 
-The AI determines:
+AI-generated abilities **must never rely on vague mechanical wording**. If the ability damages, heals, shields, moves, buffs, debuffs, creates an area, affects multiple targets, or lasts for a duration, those values must be explicit.
 
-- Ability Name
-- Description
-- Effects
-- Resource Cost
-- Ability Point Cost
-- Attribute Requirements
-- Special Restrictions when genuinely needed
+Examples:
 
-The AI may not invent a different class-resource pool during play. It must use the character's established class resource unless the ability itself explicitly introduces a special resource mechanic.
+- `Damage: 1d6`
+- `Move: 3 squares`
+- `Heal: 1d8`
+- `Shield: 6 damage`
+- `Range: 5 squares`
+- `Duration: 2 rounds`
+- `Targets: up to 2 enemies`
 
 ---
 
 # 13. Balance Philosophy
 
-Design Goals
-
 - No mandatory abilities.
 - Every class should support multiple playstyles.
 - Powerful abilities require meaningful investment.
 - Every build should have strengths and weaknesses.
-- Player creativity should always be rewarded.
+- Player creativity should be rewarded.
 - Resource cost, action economy, positioning, targeting, and requirements are preferred balancing tools over cooldowns.
+- When two abilities fill a similar role, the one with the lower Resource Cost should normally have a weaker effect, while the more expensive one may deal more damage, move farther, heal more, affect more targets, last longer, or provide a stronger special effect.
 
 ---
 
 # 14. Future Systems
 
-Possible additions:
-
-- Ability Loadout Presets
-- Multiplayer Ability Sharing
-- Seasonal Abilities
-- Event Exclusive Abilities
-- Cosmetic Ability Effects
+Possible additions include Ability Loadout Presets, Multiplayer Ability Sharing, Seasonal Abilities, Event Exclusive Abilities, and Cosmetic Ability Effects.
 
 ---
 
 # 15. Ability Scaling
 
-Abilities should remain useful throughout an entire campaign without requiring players to repeatedly replace their favorite abilities.
+Abilities do not gain independent levels. Their effectiveness may scale with character level, attributes, equipment, passive abilities, status effects, and environmental conditions.
 
-Abilities do **not** gain levels independently.
-
-Instead, an ability's effectiveness may scale automatically based on the character using it.
-
-Possible scaling factors include:
-
-- Character Level
-- Attributes
-- Equipment
-- Passive Abilities
-- Active Status Effects
-- Environmental Conditions
-
-Each ability determines which attributes contribute to its effectiveness.
-
-Example scaling statistics include:
-
-- Damage
-- Healing
-- Shield Strength
-- Duration
-- Range
-- Number of Targets
-- Area of Effect
-- Resource Cost when appropriate
-
-Scaling should preserve an ability's identity while ensuring it remains relevant throughout progression.
+An ability's identity should stay recognizable as the character grows. However, progression should also introduce genuinely stronger abilities rather than making every beginner ability equal to late-game powers.
 
 ---
 
 # 16. Usage Restrictions
 
-There is **no universal cooldown system** for normal abilities.
+There is no universal cooldown system for normal abilities.
 
-Exceptionally powerful or unusual abilities may define explicit restrictions such as:
-
-- Once Per Encounter
-- Once Per Rest
-- Once Per Day
-- Limited Charges
-- Requires a specific condition or setup
-
-These restrictions belong to the individual ability and must be visible to the player. They are separate from normal resource costs.
+Exceptionally powerful abilities may define explicit restrictions such as Once Per Encounter, Once Per Rest, Once Per Day, Limited Charges, or a required setup condition. These restrictions must always be visible to the player.
 
 ---
 
 # 17. Targeting Rules
 
-Every ability defines how it selects valid targets.
+Every ability defines valid targets, maximum range, area of effect when applicable, and target limit.
 
-Common targeting methods include:
-
-- Self
-- Ally
-- Enemy
-- Object
-- Ground Location
-- Single Target
-- Multiple Targets
-- Radius
-- Cone
-- Line
-- Chain
-- Random Target
-- Nearest Target
-- Lowest Health Target
-
-Each ability should clearly define:
-
-- Valid Targets
-- Maximum Range
-- Area of Effect
-- Target Limit
-
-Targeting should remain consistent so both players and the AI Game Master can reliably understand how every ability functions.
+Common targeting methods include Self, Ally, Enemy, Object, Ground Location, Single Target, Multiple Targets, Radius, Cone, Line, Chain, Random Target, Nearest Target, and Lowest Health Target.
 
 ---
 
 # 18. Ability Interactions
 
-Abilities may interact with other abilities, status effects, environmental hazards, equipment, or world objects.
-
-Examples include:
-
-- Fire igniting Oil
-- Ice freezing Water
-- Lightning spreading through Wet targets
-- Wind increasing Fire spread
-- Earth creating defensive barriers
-
-Interactions should reward creative thinking without requiring players to memorize overly complex combinations.
-
-The AI Game Master may create additional logical interactions provided they remain consistent with established world rules.
+Abilities may interact with other abilities, status effects, environmental hazards, equipment, or world objects. Logical interactions may include fire igniting oil, ice freezing water, lightning spreading through wet targets, wind affecting fire, and earth creating barriers.
 
 ---
 
 # 19. Ability Templates
 
-Every ability should follow a standardized structure.
+Every ability should use a standardized structure.
 
 ## General Information
 
@@ -390,16 +246,12 @@ Every ability should follow a standardized structure.
 - Category
 - Type
 
----
-
 ## Requirements
 
 - Ability Point Cost
 - Attribute Requirements
-- Class Restrictions (if any)
-- Origin Restrictions (if any)
-
----
+- Class Restrictions if any
+- Origin Restrictions if any
 
 ## Usage
 
@@ -407,18 +259,46 @@ Every ability should follow a standardized structure.
 - Valid Targets
 - Range
 - Area of Effect
-- Special Restrictions (if any)
-
----
+- Special Restrictions if any
 
 ## Effects
 
-- Primary Effect
-- Secondary Effects
-- Status Effects Applied
-- Scaling Attributes
-- Special Interactions
+Every applicable effect must be explicit:
+
+- Damage expression
+- Healing expression
+- Movement squares
+- Shield amount
+- Buff/debuff value
+- Duration
+- Number of targets
+- Area size
+- Status effects applied
+- Scaling attributes
+- Special interactions
 
 ---
 
-Using a standardized template ensures consistency for both handcrafted and AI-generated abilities while making future balancing significantly easier.
+# 20. Exact Mechanical Display Rules
+
+Whenever the player is choosing, viewing, equipping, purchasing, looting, or inspecting an ability, the UI must show the actual mechanical effect rather than only flavor text.
+
+Examples:
+
+`Roadside Feint — Damage 1d6 | Move 1 square | Range 1 | Cost 10 Trailmarks`
+
+`Blink Step — Move 4 squares | Cost 15 Focus`
+
+`Mending Light — Heal 1d8+2 | Range 4 | Cost 20 Divine Power`
+
+Flavor descriptions may appear alongside these values but may never replace them.
+
+---
+
+# 21. Power and Resource-Cost Progression
+
+Beginner abilities should be intentionally modest. Early characters should normally receive low-damage, short-range, small-healing, short-movement, or narrow utility powers with low Resource Costs.
+
+As the campaign progresses, stronger abilities become available. Higher-tier abilities may deal more damage, heal more, move farther, affect larger areas, hit more targets, apply stronger conditions, or combine multiple effects. Those stronger abilities should generally have correspondingly higher Resource Costs.
+
+There is no rule that an ability's cost must be affordable when it is acquired or equipped. A character may own and slot a powerful ability whose Resource Cost exceeds their current maximum pool. In that case the ability is visibly unavailable until progression raises their Resource capacity enough to pay the cost.
