@@ -5,11 +5,7 @@ from backend.game.world_creation import run_world_creation
 from backend.game.character_creation import run_character_creation
 from backend.game.level_up import run_spending_screen
 from backend.game.ability_learning import run_ap_spending_screen
-from backend.game.armor_runtime import (
-    finish_character_creation_with_armor,
-    install_armor_runtime,
-    show_player_armor,
-)
+from backend.game.armor_runtime import finish_character_creation_with_armor, install_armor_runtime
 from backend.game.inventory import show_inventory, show_equipment, run_equipment_screen
 from backend.game.attributes import SKILL_ATTRIBUTE
 
@@ -148,8 +144,7 @@ def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
     print("Type 'start game' to create a world, build a character, and begin a new adventure.")
     print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
-    print("Type 'inventory' to view everything you carry. Type 'equipment' to view equipped gear. Type 'equip' to swap gear.")
-    print("Type 'armor' to view your five armor slots and Armor HP.")
+    print("Type 'inventory' to view your items and equipped armor/gear. Type 'equipment' to view equipped gear only. Type 'equip' to swap gear.")
     print("Type 'spend sp' to upgrade stats. Type 'spend ap' to learn abilities. Type 'quit' to stop.\n")
     game_master = GameMaster()
     install_armor_runtime(game_master)
@@ -166,8 +161,6 @@ def main() -> None:
             show_equipment(game_master.state.data.get("player", {})); continue
         if lowered in {"equip", "change equipment", "swap gear", "swap equipment"}:
             run_equipment_screen(game_master); continue
-        if lowered in {"armor", "show armor", "armor status"}:
-            show_player_armor(game_master); continue
         if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
             player = run_spending_screen(game_master); _print_progress(player); continue
         if lowered in {"spend ap", "spend ability points", "learn ability", "learn abilities", "ability shop"}:
