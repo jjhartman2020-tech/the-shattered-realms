@@ -10,6 +10,8 @@ The AI may choose context, but the engine owns mechanical values.
 from copy import deepcopy
 from typing import Dict
 
+from .resources import max_resource_from_mana
+
 ATTRIBUTE_NAMES = (
     "health", "mana", "strength", "dexterity", "constitution",
     "intelligence", "wisdom", "charisma", "speed", "defense",
@@ -138,11 +140,14 @@ def trading_influence(charisma: int) -> int:
 def character_sheet_channels(attributes: Dict | None = None, level: int = 1) -> Dict:
     a = normalize_attributes(attributes)
     level = max(1, min(MAX_LEVEL, int(level)))
+    max_resource = max_resource_from_mana(a["mana"])
     return {
         "attributes": a,
         "level_health_bonus": level_health_bonus(level),
         "max_health_base": max(1, a["health"] + level_health_bonus(level)),
-        "max_mana_base": a["mana"],
+        "max_resource_base": max_resource,
+        # Backward-compatible alias. This is the same universal class-resource capacity.
+        "max_mana_base": max_resource,
         "strength_rating": a["strength"],
         "dexterity_rating": a["dexterity"],
         "constitution_rating": a["constitution"],
@@ -187,8 +192,11 @@ def build_combatant(name: str, team: str, attributes: Dict | None = None, *,
         "attribute_channels": sheet,
         "hp": sheet["max_health_base"] if hp is None else int(hp),
         "max_hp": sheet["max_health_base"],
-        "mana": sheet["max_mana_base"],
-        "max_mana": sheet["max_mana_base"],
+        "resource": sheet["max_resource_base"],
+        "max_resource": sheet["max_resource_base"],
+        # Backward-compatible aliases used by older save/runtime code.
+        "mana": sheet["max_resource_base"],
+        "max_mana": sheet["max_resource_base"],
         "attack_bonus": 0,
         "damage_bonus": sheet["strength_damage_bonus"],
         "armor_class": BASE_ARMOR_CLASS + sheet["defense_bonus"],
@@ -201,4 +209,9 @@ def build_combatant(name: str, team: str, attributes: Dict | None = None, *,
     }
     if isinstance(overrides, dict):
         actor.update(overrides)
+    # Keep legacy mana aliases synchronized with the universal resource pool.
+    if "resource" in actor:
+        actor["mana"] = int(actor.get("resource", 0) or 0)
+    if "max_resource" in actor:
+        actor["max_mana"] = int(actor.get("max_resource", 0) or 0)
     return actor
