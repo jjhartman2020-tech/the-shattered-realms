@@ -2,6 +2,7 @@
 
 from backend.ai.game_master import GameMaster
 from backend.game.character_creation import run_character_creation
+from backend.game.level_up import run_spending_screen
 
 
 def _position_xy(actor) -> tuple[int, int]:
@@ -76,7 +77,8 @@ def _print_combat_results(results, combat=None) -> None:
 def main() -> None:
     print("=" * 48); print("THE SHATTERED REALMS — AI GAME MASTER"); print("=" * 48)
     print("Type 'start game' to build a new character.")
-    print("Type 'progress' to view Level, XP Orbs, SP, and AP. Type 'quit' to stop.\n")
+    print("Type 'progress' to view Level, XP Orbs, SP, and AP.")
+    print("Type 'spend sp' to upgrade your stats with saved Skill Points. Type 'quit' to stop.\n")
     game_master = GameMaster()
 
     while True:
@@ -85,6 +87,10 @@ def main() -> None:
             print("Campaign paused."); break
         if lowered == "progress":
             _print_progress(game_master.state.snapshot().get("player", {})); continue
+        if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
+            player = run_spending_screen(game_master)
+            _print_progress(player)
+            continue
         if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
             created = run_character_creation(game_master); player = created["player"]
             print("\n" + "=" * 48); print(f"{player.get('name')} — {player.get('class')}")
@@ -105,6 +111,7 @@ def main() -> None:
         after_player = game_master.state.snapshot().get("player", {})
         if int(after_player.get("level", 1) or 1) > before_level:
             print("\n⬆️ LEVEL UP!"); _print_progress(after_player)
+            print("Type 'spend sp' whenever you want to allocate your new Skill Points.")
         print("\n" + result.get("narration", "The world waits...") + "\n")
 
 
