@@ -38,9 +38,9 @@ def resource_key(resource_name: str | None) -> str:
 
 
 def max_resource_from_attribute(resource_attribute: int) -> int:
-    """Every complete 2 Resource attribute points grant 10 class-resource points."""
+    """Every Resource attribute point grants 5 class-resource points."""
     score = max(0, min(NATURAL_RESOURCE_ATTRIBUTE_CAP, int(resource_attribute)))
-    return (score // 2) * 10
+    return score * 5
 
 
 def resource_regeneration_per_round(resource_attribute: int) -> int:
