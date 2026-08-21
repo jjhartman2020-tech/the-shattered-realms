@@ -5,14 +5,15 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+from .resources import max_resource_from_mana, resource_key, resource_name_for_class
+
 PROTOTYPE_POWER_STRIKE = {
     "name": "Power Strike",
     "description": "A committed melee strike used to test active ability rules.",
     "type": "active",
     "category": "offensive",
-    "resource": "mana",
-    "resource_cost": 1,
-    "cooldown": 1,
+    "resource": "class",
+    "resource_cost": 10,
     "target": "enemy",
     "range": 1,
     "requires_attack_roll": True,
@@ -32,7 +33,9 @@ DEFAULT_STATE = {
             "health": 0, "mana": 3, "strength": 0, "dexterity": 0, "constitution": 0,
             "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0, "defense": 0,
         },
-        "hp": 0, "max_hp": 0, "temporary_hp": 0, "mana": 3, "max_mana": 3,
+        "hp": 0, "max_hp": 0, "temporary_hp": 0,
+        "resource_name": "Mana", "resource_type": "mana", "resource": 10, "max_resource": 10,
+        "mana": 10, "max_mana": 10,
         "armor_class": 10, "initiative_bonus": 0, "movement": 6,
         "saving_throw_proficiencies": [], "skill_proficiencies": [], "expertise": [],
         "skills": {"acrobatics": 0, "animal_handling": 0, "arcana": 0, "athletics": 0,
@@ -66,25 +69,38 @@ class GameState:
         if initial: self._deep_merge(self.data, deepcopy(initial))
         self._migrate_prototype_player()
 
-    def _migrate_prototype_player(self) -> None:
-        """Bring legacy test saves forward without forcing a combat reset.
+    @staticmethod
+    def _scaled_current(old_current: int, old_max: int, new_max: int) -> int:
+        if new_max <= 0:
+            return 0
+        if old_max <= 0:
+            return new_max
+        ratio = max(0.0, min(1.0, float(old_current) / float(old_max)))
+        return max(0, min(new_max, round(ratio * new_max)))
 
-        This migration is intentionally prototype-only. It gives the current test
-        character a small real Mana pool and equips Power Strike so an encounter
-        that was already in progress before the ability system existed can test
-        the new mechanics immediately.
-        """
+    def _migrate_prototype_player(self) -> None:
+        """Bring legacy test saves forward to class resources and equipped abilities."""
         player = self.data.setdefault("player", {})
         stats = player.setdefault("stats", {})
 
-        # The current prototype needs a non-zero resource pool to exercise mana
-        # spending. Preserve any real higher value that already exists.
+        # Keep the existing prototype able to exercise resource spending.
         if int(stats.get("mana", 0) or 0) <= 0:
             stats["mana"] = 3
-        if int(player.get("max_mana", 0) or 0) <= 0:
-            player["max_mana"] = int(stats.get("mana", 3) or 3)
-        if int(player.get("mana", 0) or 0) <= 0:
-            player["mana"] = int(player.get("max_mana", 3) or 3)
+
+        resource_name = resource_name_for_class(player.get("class"))
+        resource_type = resource_key(resource_name)
+        new_max = max_resource_from_mana(int(stats.get("mana", 0) or 0))
+        old_current = int(player.get("resource", player.get("mana", 0)) or 0)
+        old_max = int(player.get("max_resource", player.get("max_mana", 0)) or 0)
+        new_current = self._scaled_current(old_current, old_max, new_max)
+
+        player["resource_name"] = resource_name
+        player["resource_type"] = resource_type
+        player["resource"] = new_current
+        player["max_resource"] = new_max
+        # Backward-compatible aliases while older systems are migrated.
+        player["mana"] = new_current
+        player["max_mana"] = new_max
 
         unlocked = player.get("unlocked_abilities")
         if not isinstance(unlocked, list):
@@ -95,36 +111,40 @@ class GameState:
             equipped = []
             player["equipped_abilities"] = equipped
 
-        def has_power_strike(items: List[Dict]) -> bool:
-            return any(
-                isinstance(item, dict)
-                and str(item.get("name") or "").strip().lower() == "power strike"
-                for item in items
-            )
+        def normalize_power_strike(items: List[Dict]) -> None:
+            found = False
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("name") or "").strip().lower() == "power strike":
+                    items[index] = deepcopy(PROTOTYPE_POWER_STRIKE)
+                    found = True
+            if not found:
+                items.append(deepcopy(PROTOTYPE_POWER_STRIKE))
 
-        if not has_power_strike(unlocked):
-            unlocked.append(deepcopy(PROTOTYPE_POWER_STRIKE))
-        if not has_power_strike(equipped):
-            equipped.append(deepcopy(PROTOTYPE_POWER_STRIKE))
+        normalize_power_strike(unlocked)
+        normalize_power_strike(equipped)
 
-        # Hot-sync the current player combatant so adding a prototype ability
-        # does not require throwing away an encounter that is already active.
+        # Hot-sync an encounter already in progress.
         combat = self.data.get("combat")
         if isinstance(combat, dict) and combat.get("active"):
             player_name = str(player.get("name") or "Traveler")
             for actor in combat.get("combatants", []):
                 if not isinstance(actor, dict) or actor.get("name") != player_name:
                     continue
+                actor_old_current = int(actor.get("resource", actor.get("mana", old_current)) or 0)
+                actor_old_max = int(actor.get("max_resource", actor.get("max_mana", old_max)) or 0)
+                actor_current = self._scaled_current(actor_old_current, actor_old_max, new_max)
                 actor["abilities"] = deepcopy(equipped)
-                actor_max_mana = int(actor.get("max_mana", 0) or 0)
-                if actor_max_mana <= 0:
-                    actor["max_mana"] = int(player.get("max_mana", 3) or 3)
-                actor_mana = int(actor.get("mana", 0) or 0)
-                if actor_mana <= 0:
-                    actor["mana"] = int(actor.get("max_mana", player.get("mana", 3)) or 3)
+                actor["resource_name"] = resource_name
+                actor["resource_type"] = resource_type
+                actor["resource"] = actor_current
+                actor["max_resource"] = new_max
+                actor["mana"] = actor_current
+                actor["max_mana"] = new_max
+                actor.pop("ability_cooldowns", None)
                 break
 
-        # Persist the migration so future runs do not depend on defaults alone.
         self.save()
 
     def _load(self) -> Dict:
@@ -151,16 +171,18 @@ class GameState:
                 continue
             actor = deepcopy(raw_actor)
             max_hp = max(0, int(actor.get("max_hp", actor.get("hp", 0)) or 0))
-            max_mana = max(0, int(actor.get("max_mana", actor.get("mana", 0)) or 0))
+            max_resource = max(0, int(actor.get("max_resource", actor.get("max_mana", 0)) or 0))
             actor["hp"] = max_hp
             actor["max_hp"] = max_hp
-            actor["mana"] = max_mana
-            actor["max_mana"] = max_mana
+            actor["resource"] = max_resource
+            actor["max_resource"] = max_resource
+            actor["mana"] = max_resource
+            actor["max_mana"] = max_resource
             actor["movement_used"] = 0
             actor["primary_action_used"] = False
             actor["defending"] = False
             actor["active_defense_ac_bonus"] = 0
-            actor["ability_cooldowns"] = {}
+            actor.pop("ability_cooldowns", None)
             actor["defeated"] = False
             actors.append(actor)
         return {"combatants": actors, "grid": deepcopy(combat.get("grid", {}))}
@@ -193,9 +215,10 @@ class GameState:
                 max_hp = int(player.get("max_hp", 0) or 0)
                 if max_hp > 0:
                     player["hp"] = max_hp
-                max_mana = int(player.get("max_mana", 0) or 0)
-                if max_mana > 0:
-                    player["mana"] = max_mana
+                max_resource = int(player.get("max_resource", player.get("max_mana", 0)) or 0)
+                if max_resource > 0:
+                    player["resource"] = max_resource
+                    player["mana"] = max_resource
                 player["temporary_hp"] = 0
                 player["conditions"] = []
                 continue
@@ -211,15 +234,17 @@ class GameState:
                     player["hp"] = max(0, int(requested or 0))
                 continue
 
-            if change_type == "restore_mana":
+            if change_type in {"restore_mana", "restore_resource"}:
                 target = str(change.get("target") or "").strip()
                 player = self.data.setdefault("player", {})
                 player_name = str(player.get("name") or "Traveler")
                 if not target or target == player_name:
-                    requested = change.get("mana")
+                    requested = change.get("resource", change.get("mana"))
                     if requested is None:
-                        requested = player.get("max_mana", player.get("mana", 0))
-                    player["mana"] = max(0, int(requested or 0))
+                        requested = player.get("max_resource", player.get("max_mana", 0))
+                    value = max(0, int(requested or 0))
+                    player["resource"] = value
+                    player["mana"] = value
                 continue
 
             path = change.get("path")
