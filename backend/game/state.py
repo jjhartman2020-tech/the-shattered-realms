@@ -5,7 +5,13 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-from .resources import max_resource_from_mana, resource_key, resource_name_for_class
+from .attributes import (
+    BASE_ARMOR_CLASS,
+    character_sheet_channels,
+    earned_attribute_points,
+    normalize_attributes,
+)
+from .resources import max_resource_from_attribute, resource_key, resource_name_for_class
 
 PROTOTYPE_POWER_STRIKE = {
     "name": "Power Strike",
@@ -23,26 +29,34 @@ PROTOTYPE_POWER_STRIKE = {
     "prototype": True,
 }
 
+DEFAULT_SKILLS = {
+    "athletics": 0, "grappling": 0, "might": 0,
+    "sleight_of_hand": 0, "lockpicking": 0, "pickpocketing": 0, "precision": 0,
+    "acrobatics": 0, "stealth": 0, "evasion": 0,
+    "endurance": 0, "fortitude": 0,
+    "investigation": 0, "arcana": 0, "history": 0, "nature": 0, "engineering": 0,
+    "perception": 0, "insight": 0, "survival": 0, "medicine": 0, "animal_handling": 0,
+    "persuasion": 0, "deception": 0, "intimidation": 0, "performance": 0, "leadership": 0,
+    "spellcasting": 0, "channeling": 0,
+}
+
 DEFAULT_STATE = {
     "campaign": {"name": "Untitled Campaign", "genre": "fantasy", "day": 1, "time": "morning"},
     "player": {
         "name": "Traveler", "level": 1, "xp_orbs": 0, "class": "unassigned", "subclass": None,
         "background": None, "species": None, "inspiration": 0,
-        "attribute_points_unspent": 60, "ability_points": 0,
+        "attribute_points_unspent": 42, "ability_points": 0,
         "stats": {
-            "health": 0, "mana": 3, "strength": 0, "dexterity": 0, "constitution": 0,
-            "intelligence": 0, "wisdom": 0, "charisma": 0, "speed": 0, "defense": 0,
+            "health": 0, "resource": 0, "strength": 0, "dexterity": 0, "agility": 0,
+            "constitution": 0, "intelligence": 0, "wisdom": 0, "charisma": 0,
+            "speed": 0, "defense": 0, "luck": 0, "magic": 0,
         },
-        "hp": 0, "max_hp": 0, "temporary_hp": 0,
-        "resource_name": "Mana", "resource_type": "mana", "resource": 10, "max_resource": 10,
-        "mana": 10, "max_mana": 10,
+        "hp": 1, "max_hp": 1, "temporary_hp": 0,
+        "resource_name": "Mana", "resource_type": "mana", "resource": 0, "max_resource": 0,
+        "mana": 0, "max_mana": 0,
         "armor_class": 10, "initiative_bonus": 0, "movement": 6,
         "saving_throw_proficiencies": [], "skill_proficiencies": [], "expertise": [],
-        "skills": {"acrobatics": 0, "animal_handling": 0, "arcana": 0, "athletics": 0,
-                   "deception": 0, "history": 0, "insight": 0, "intimidation": 0,
-                   "investigation": 0, "medicine": 0, "nature": 0, "perception": 0,
-                   "performance": 0, "persuasion": 0, "religion": 0,
-                   "sleight_of_hand": 0, "stealth": 0, "survival": 0},
+        "skills": deepcopy(DEFAULT_SKILLS),
         "proficiencies": {"armor": [], "weapons": [], "tools": [], "languages": []},
         "death_saves": {"successes": 0, "failures": 0},
         "spellcasting": {"ability": None, "spell_save_dc": 0, "spell_attack_bonus": 0,
@@ -79,17 +93,31 @@ class GameState:
         return max(0, min(new_max, round(ratio * new_max)))
 
     def _migrate_prototype_player(self) -> None:
-        """Bring legacy test saves forward to class resources and equipped abilities."""
+        """Bring legacy saves forward to the current stat/resource schema."""
         player = self.data.setdefault("player", {})
-        stats = player.setdefault("stats", {})
+        raw_stats = player.setdefault("stats", {})
 
-        # Keep the existing prototype able to exercise resource spending.
-        if int(stats.get("mana", 0) or 0) <= 0:
-            stats["mana"] = 3
+        # Old saves called the universal capacity stat ``mana``. Because DEFAULT_STATE
+        # now contains Resource=0 before deep-merge, explicitly carry a meaningful
+        # legacy Mana value forward when Resource has not yet been populated.
+        legacy_mana_stat = int(raw_stats.get("mana", 0) or 0)
+        if int(raw_stats.get("resource", 0) or 0) <= 0 and legacy_mana_stat > 0:
+            raw_stats["resource"] = legacy_mana_stat
+        stats = normalize_attributes(raw_stats)
+        player["stats"] = stats
+
+        level = max(1, int(player.get("level", 1) or 1))
+        sheet = character_sheet_channels(stats, level)
+
+        old_hp = int(player.get("hp", 0) or 0)
+        old_max_hp = int(player.get("max_hp", 0) or 0)
+        new_max_hp = int(sheet["max_health_base"])
+        player["max_hp"] = new_max_hp
+        player["hp"] = self._scaled_current(old_hp, old_max_hp, new_max_hp)
 
         resource_name = resource_name_for_class(player.get("class"))
         resource_type = resource_key(resource_name)
-        new_max = max_resource_from_mana(int(stats.get("mana", 0) or 0))
+        new_max = max_resource_from_attribute(stats["resource"])
         old_current = int(player.get("resource", player.get("mana", 0)) or 0)
         old_max = int(player.get("max_resource", player.get("max_mana", 0)) or 0)
         new_current = self._scaled_current(old_current, old_max, new_max)
@@ -98,9 +126,34 @@ class GameState:
         player["resource_type"] = resource_type
         player["resource"] = new_current
         player["max_resource"] = new_max
+        player["resource_regeneration_per_round"] = int(sheet["resource_regeneration_per_round"])
         # Backward-compatible aliases while older systems are migrated.
         player["mana"] = new_current
         player["max_mana"] = new_max
+
+        player["armor_class"] = BASE_ARMOR_CLASS + int(sheet["defense_bonus"])
+        player["initiative_bonus"] = int(sheet["initiative_bonus"])
+        player["movement"] = int(sheet["movement"])
+        player["critical_chance_percent"] = int(sheet["critical_chance_percent"])
+        player["physical_resistance_percent"] = int(sheet["physical_resistance_percent"])
+        player["status_resistance_percent"] = int(sheet["status_resistance_percent"])
+        player["defend_action_ac_bonus"] = int(sheet["defend_action_ac_bonus"])
+
+        available = earned_attribute_points(level)
+        spent = sum(stats.values())
+        player["attribute_points_unspent"] = max(0, available - spent)
+
+        skills = player.get("skills")
+        if not isinstance(skills, dict):
+            skills = {}
+        migrated_skills = deepcopy(DEFAULT_SKILLS)
+        for name in migrated_skills:
+            if name in skills:
+                migrated_skills[name] = int(skills.get(name, 0) or 0)
+        # Useful legacy skill migrations where the meaning stayed equivalent.
+        if "pickpocketing" not in skills and "sleight_of_hand" in skills:
+            migrated_skills["pickpocketing"] = int(skills.get("sleight_of_hand", 0) or 0)
+        player["skills"] = migrated_skills
 
         unlocked = player.get("unlocked_abilities")
         if not isinstance(unlocked, list):
@@ -125,23 +178,38 @@ class GameState:
         normalize_power_strike(unlocked)
         normalize_power_strike(equipped)
 
-        # Hot-sync an encounter already in progress.
+        # Hot-sync an encounter already in progress so old combats do not keep stale
+        # movement, initiative, crit, resistance, resource, or attribute data.
         combat = self.data.get("combat")
         if isinstance(combat, dict) and combat.get("active"):
             player_name = str(player.get("name") or "Traveler")
             for actor in combat.get("combatants", []):
                 if not isinstance(actor, dict) or actor.get("name") != player_name:
                     continue
+                actor_old_hp = int(actor.get("hp", old_hp) or 0)
+                actor_old_max_hp = int(actor.get("max_hp", old_max_hp) or 0)
                 actor_old_current = int(actor.get("resource", actor.get("mana", old_current)) or 0)
                 actor_old_max = int(actor.get("max_resource", actor.get("max_mana", old_max)) or 0)
                 actor_current = self._scaled_current(actor_old_current, actor_old_max, new_max)
+                actor["attributes"] = deepcopy(stats)
+                actor["attribute_channels"] = deepcopy(sheet)
+                actor["hp"] = self._scaled_current(actor_old_hp, actor_old_max_hp, new_max_hp)
+                actor["max_hp"] = new_max_hp
                 actor["abilities"] = deepcopy(equipped)
                 actor["resource_name"] = resource_name
                 actor["resource_type"] = resource_type
                 actor["resource"] = actor_current
                 actor["max_resource"] = new_max
+                actor["resource_regeneration_per_round"] = int(sheet["resource_regeneration_per_round"])
                 actor["mana"] = actor_current
                 actor["max_mana"] = new_max
+                actor["armor_class"] = player["armor_class"]
+                actor["initiative_bonus"] = player["initiative_bonus"]
+                actor["movement"] = player["movement"]
+                actor["critical_chance_percent"] = player["critical_chance_percent"]
+                actor["physical_resistance_percent"] = player["physical_resistance_percent"]
+                actor["status_resistance_percent"] = player["status_resistance_percent"]
+                actor["defend_action_ac_bonus"] = player["defend_action_ac_bonus"]
                 actor.pop("ability_cooldowns", None)
                 break
 
