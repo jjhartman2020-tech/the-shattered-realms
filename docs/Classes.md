@@ -1,6 +1,6 @@
 # Classes.md
 
-Version: 1.0
+Version: 1.1
 Status: In Development
 
 ---
@@ -40,28 +40,40 @@ Status: In Development
 # 2. Default Classes
 
 ## Warrior
+Primary Resource: **Stamina**
 
 ## Rogue
+Primary Resource: **Energy**
 
 ## Paladin
+Primary Resource: **Divine Power**
 
 ## Ranger
+Primary Resource: **Focus**
 
 ## Mage
+Primary Resource: **Mana**
 
 ## Cleric
+Primary Resource: **Divine Power**
 
 ## Druid
+Primary Resource: **Mana**
 
 ## Monk
+Primary Resource: **Ki**
 
 ## Bard
+Primary Resource: **Focus**
 
 ## Barbarian
+Primary Resource: **Rage**
 
 ## Sorcerer
+Primary Resource: **Mana**
 
 ## Warlock
+Primary Resource: **Shadow Energy**
 
 ---
 
@@ -99,6 +111,9 @@ The AI creates:
 - Recommended Stats
 - Recommended Weapons
 - Recommended Armor
+- Primary Class Resource
+
+The primary resource should fit the class identity. Existing resource names may be reused, or the AI may create a custom resource name when appropriate, as long as it follows the same resource-capacity rules.
 
 ---
 
@@ -136,6 +151,12 @@ or
 
 ## Playstyle
 
+## Primary Resource
+
+Every class has one primary ability resource. The resource's name depends on the class, but its maximum pool is determined by the universal **Mana attribute** described in `Stats.md`.
+
+The Mana attribute therefore represents a character's general supernatural/combat resource capacity, even when the class displays that pool under another name such as Stamina, Rage, Focus, Energy, Divine Power, Ki, or Shadow Energy.
+
 ---
 
 # 6. Starting Abilities
@@ -160,11 +181,13 @@ or
 
 ## Ability Slots
 
-## Cooldowns
-
 ## Resource Costs
 
 ## Upgrades
+
+Active abilities are primarily limited by their resource costs and the combat action economy. There is **no universal cooldown system** for normal active abilities.
+
+If a character has enough of their class resource and a primary action available, they may use the same normal active ability again on a later turn.
 
 ---
 
@@ -172,9 +195,11 @@ or
 
 ## Unlock Requirements
 
-## Cooldowns
+## Resource Costs
 
 ## Restrictions
+
+Ultimate abilities may use unusually high resource costs or explicit special restrictions such as once per encounter, once per rest, or another ability-specific rule. These are not universal cooldowns.
 
 ---
 
@@ -190,17 +215,45 @@ or
 
 # 11. Class Resources
 
-## Mana
+Class resources power active abilities and other class-specific mechanics.
 
-## Rage
+Default resource mapping:
 
-## Focus
+| Class | Primary Resource |
+| --- | --- |
+| Warrior | Stamina |
+| Rogue | Energy |
+| Paladin | Divine Power |
+| Ranger | Focus |
+| Mage | Mana |
+| Cleric | Divine Power |
+| Druid | Mana |
+| Monk | Ki |
+| Bard | Focus |
+| Barbarian | Rage |
+| Sorcerer | Mana |
+| Warlock | Shadow Energy |
 
-## Energy
+## Resource Capacity
 
-## Divine Power
+All primary class resources use the character's **Mana attribute** to determine their maximum pool:
 
-## Ki
+`Maximum Class Resource = floor(Mana / 2) x 10`
+
+Examples:
+
+- Mana 0-1 = 0 resource
+- Mana 2-3 = 10 resource
+- Mana 4-5 = 20 resource
+- Mana 10-11 = 50 resource
+- Mana 20-21 = 100 resource
+- Mana 30 = 150 resource
+
+The pool is displayed using the class resource's name. A Warrior with Mana 10 therefore has **50 Stamina**, while a Mage with Mana 10 has **50 Mana**.
+
+Ability costs are paid from this pool. A character cannot use an ability if they do not have enough of the required resource.
+
+Resource regeneration and recovery rules are defined separately and must not be invented by the AI Game Master.
 
 ---
 
@@ -226,6 +279,8 @@ or
 
 ## Every Build Has Trade-Offs
 
+Resource capacity, ability costs, action economy, positioning, attribute requirements, and special restrictions should be used to balance abilities rather than universal cooldowns.
+
 ---
 
 # 14. Future Classes
@@ -242,9 +297,11 @@ or
 
 ## Psion
 
-## Engineer# 
+## Engineer
 
-Signature Abilities
+---
+
+# Signature Abilities
 
 ## Philosophy
 
@@ -257,4 +314,3 @@ Beyond these signature abilities, players are free to discover, learn, upgrade, 
 No two characters of the same class are expected to develop identically.
 
 Player choices, quests, legendary teachers, artifacts, and AI-generated events all influence how a character evolves.
-
