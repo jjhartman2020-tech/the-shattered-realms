@@ -24,7 +24,7 @@ class DevelopmentProvider:
             "world_notes": [],
             "suggested_actions": [
                 {"text": "Look around", "requires_roll": False, "skill": None},
-                {"text": "Talk to someone nearby", "requires_roll": False, "skill": None},
+                {"text": "Talk to someone nearby", "requires_roll": True, "skill": "charisma"},
                 {"text": "Move toward the most interesting lead", "requires_roll": False, "skill": None},
             ],
             "debug": {"provider": "development"},
@@ -54,7 +54,11 @@ GAME MASTER / STORY CONTROL
 - Stop for player input at meaningful decision points.
 - Questions should normally be decision prompts such as 'What do you do?' rather than requests for the player to create story facts.
 - Return exactly 3 concise suggested actions that make sense RIGHT NOW. They are suggestions only; the player may type anything else.
-- For EACH suggested action, also predict whether that exact action would normally require a non-combat check if attempted immediately. If yes, include the most likely skill. If no, set skill to null.
+- For EACH suggested action, also predict whether that exact action would normally require a non-combat check if attempted immediately.
+- If a suggested action requires a roll, the preview MUST name only the governing CORE STAT, never a skill/subskill.
+- The only allowed roll-preview names are: health, resource, strength, dexterity, agility, constitution, intelligence, wisdom, charisma, speed, defense, luck, magic.
+- Examples: Engineering -> intelligence; Investigation -> intelligence; Athletics -> strength; Acrobatics -> agility; Stealth -> agility; aiming/precision -> dexterity; Perception/Insight/Survival/Medicine -> wisdom; Persuasion/Deception/Intimidation -> charisma; spellcasting/channeling -> magic.
+- Store that core-stat preview in the suggested action's `skill` field for compatibility with the current terminal UI. Do NOT put words like Engineering, Athletics, Acrobatics, Stealth, Investigation, or Persuasion there.
 - This suggestion metadata is a preview, not a guaranteed outcome. Circumstances may change and Python/the later action-resolution pass remains authoritative.
 
 NARRATION STYLE / CLARITY
@@ -84,16 +88,17 @@ CURRENT CORE RULES
 
 CHECK RULES
 - Ordinary uncontested actions do not need rolls. Risky, contested, uncertain non-combat actions whose success matters require a check.
-- On the first pass, if a check is needed, set requires_roll=true and choose the most appropriate skill and difficulty from trivial, easy, standard, hard, very_hard, extreme. Never invent the die result.
-- Use the whole difficulty range. Do NOT default to Hard just because an action involves danger or meaningful consequences.
-- Difficulty means how technically difficult the attempted task itself is in the current circumstances, not how dramatic the scene is.
-- Trivial (DC 5): nearly automatic but still uncertain under pressure.
-- Easy (DC 8): favorable or simple challenge.
-- Standard (DC 12): the normal default for a meaningful uncertain action. Most routine adventuring checks should land here.
-- Hard (DC 16): clearly difficult, strongly opposed, or performed in bad conditions. Use less often than Standard.
-- Very Hard (DC 20): exceptional feat or elite opposition. Uncommon.
-- Extreme (DC 25): near-impossible without exceptional preparation, powers, stats, or luck. Rare.
+- On the first pass, if a check is needed, set requires_roll=true and choose the most appropriate skill, governing core attribute, and difficulty from trivial, easy, standard, hard, very_hard, extreme. Never invent the die result.
+- Easy (DC 8) is the BASE/default check. Use it when success should happen more often than not for an ordinary person under the current circumstances.
+- Standard (DC 12) is CHALLENGING. Use it when success is genuinely uncertain and a decent stat, useful skill, or good plan matters.
+- Hard (DC 16) is UNLIKELY for an ordinary person. Use it for strongly opposed actions, major disadvantages, or notably difficult feats.
+- Very Hard (DC 20) is extraordinarily unlikely — the sort of thing that should almost never succeed without exceptional ability, preparation, powers, or luck. Use very rarely.
+- Extreme (DC 25) is ENDGAME territory: final-boss-level, maxed-character-level, or comparably absurd challenges. It should almost never appear during normal low- or mid-level play.
+- Trivial (DC 5) is allowed for extremely favorable checks where failure is only barely possible because of pressure or uncertainty.
+- Do NOT raise the DC simply because the scene is dangerous, dramatic, or important. Difficulty measures how hard the attempted task itself is in the current circumstances.
 - Strong plans, good tools, surprise, leverage, useful information, help, or favorable positioning should lower difficulty when appropriate.
+- If an action would reasonably just work, do not call for a roll at all.
+- For the actual roll request, include `attribute` as one of the 13 core stats when known. You may also include the more specific skill so Python can calculate the full modifier.
 - When context contains mechanical_result, obey Python's result exactly.
 
 COMBAT RULES
@@ -122,8 +127,8 @@ ENCOUNTER RESET
 - A reset/reconfiguration does not also resolve another combat action in the same response.
 
 Return ONLY valid JSON with this top-level shape:
-{\"narration\":\"player-facing description that advances the scene\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[],\"suggested_actions\":[{\"text\":\"specific option 1\",\"requires_roll\":true,\"skill\":\"athletics\"},{\"text\":\"specific option 2\",\"requires_roll\":false,\"skill\":null},{\"text\":\"specific option 3\",\"requires_roll\":true,\"skill\":\"stealth\"}]}
-When requires_roll=true, roll contains reason, difficulty, and skill. Never reveal private chain-of-thought.
+{\"narration\":\"player-facing description that advances the scene\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[],\"suggested_actions\":[{\"text\":\"specific option 1\",\"requires_roll\":true,\"skill\":\"agility\"},{\"text\":\"specific option 2\",\"requires_roll\":false,\"skill\":null},{\"text\":\"specific option 3\",\"requires_roll\":true,\"skill\":\"intelligence\"}]}
+When requires_roll=true, roll contains reason, difficulty, skill, and attribute when known. Never reveal private chain-of-thought.
 """
         response = self.client.responses.create(model=self.model, instructions=system_instructions, input=serialize_context(context))
         raw = response.output_text.strip()
@@ -143,6 +148,7 @@ When requires_roll=true, roll contains reason, difficulty, and skill. Never reve
         suggestions = result.get("suggested_actions")
         if not isinstance(suggestions, list):
             suggestions = []
+        allowed_preview_stats = {"health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"}
         normalized = []
         for item in suggestions[:3]:
             if isinstance(item, dict):
@@ -150,10 +156,18 @@ When requires_roll=true, roll contains reason, difficulty, and skill. Never reve
                 if not text:
                     continue
                 requires_roll = bool(item.get("requires_roll", False))
-                skill = str(item.get("skill") or "").strip().lower().replace("_", " ") or None
+                stat = str(item.get("skill") or item.get("attribute") or "").strip().lower().replace("_", " ") or None
                 if not requires_roll:
-                    skill = None
-                normalized.append({"text": text, "requires_roll": requires_roll, "skill": skill})
+                    stat = None
+                elif stat not in allowed_preview_stats:
+                    stat = "intelligence" if stat in {"engineering", "investigation", "history", "arcana", "nature"} else \
+                           "strength" if stat in {"athletics", "grappling", "might"} else \
+                           "agility" if stat in {"acrobatics", "stealth", "evasion"} else \
+                           "dexterity" if stat in {"sleight of hand", "sleight_of_hand", "lockpicking", "pickpocketing", "precision"} else \
+                           "wisdom" if stat in {"perception", "insight", "survival", "medicine", "animal handling", "animal_handling"} else \
+                           "charisma" if stat in {"persuasion", "deception", "intimidation", "performance", "leadership"} else \
+                           "magic" if stat in {"spellcasting", "channeling"} else "intelligence"
+                normalized.append({"text": text, "requires_roll": requires_roll, "skill": stat})
             else:
                 text = str(item).strip()
                 if text:
