@@ -1,6 +1,6 @@
 # Abilities.md
 
-Version: 1.0
+Version: 1.1
 Status: In Development
 
 ---
@@ -21,15 +21,11 @@ Status: In Development
 12. AI Generated Abilities
 13. Balance Philosophy
 14. Future Systems
-15. scallings 
-16.cooldowns 
-17. targeting rules 
-18. abbility inteactoins 
-19. templates 
-20.general information 
-21.reqiurments 
-22.ussage 
-23. effects 
+15. Ability Scaling
+16. Usage Restrictions
+17. Targeting Rules
+18. Ability Interactions
+19. Ability Templates
 
 # 1. Ability Philosophy
 
@@ -60,7 +56,7 @@ Always active abilities that provide permanent bonuses or effects.
 
 ## Ultimate Abilities
 
-Extremely powerful abilities with significant resource costs and/or long cooldowns.
+Extremely powerful abilities with significant resource costs and/or explicit special restrictions.
 
 ---
 
@@ -92,29 +88,13 @@ Every ability has its own Ability Point cost based on its power.
 
 # 4. Ability Requirements
 
-Abilities require:
+Abilities may require:
 
 - Class
 - Attribute Requirements
 - Ability Point Cost
 
-Example:
-
-Power Strike
-Class: Warrior
-Strength: 15
-Cost: 1 AP
-
-Whirlwind
-Class: Warrior
-Strength: 30
-Cost: 2 AP
-
-Titan's Wrath
-Class: Warrior
-Strength: 60
-Constitution: 50
-Cost: 5 AP
+All attribute requirements use the game's current 0-30 attribute scale.
 
 ---
 
@@ -130,7 +110,7 @@ Locked abilities display:
 - Effects
 - Damage
 - Resource Cost
-- Cooldown
+- Special Restrictions, if any
 - Attribute Requirements
 - Ability Point Cost
 
@@ -166,6 +146,10 @@ Examples include:
 - Summoning
 - Defensive Skills
 
+Using an active ability normally consumes the character's primary action unless the ability explicitly says otherwise.
+
+Normal active abilities do **not** use a universal cooldown system. If the character has enough of the required class resource and an available action, the ability may be used again on a later turn.
+
 ---
 
 # 8. Passive Abilities
@@ -175,7 +159,7 @@ Examples include:
 - Increased Damage
 - Faster Movement
 - Increased Critical Chance
-- Reduced Mana Cost
+- Reduced Resource Cost
 - Better Stealth
 - Improved Defense
 - Better Crafting
@@ -189,13 +173,13 @@ Passive abilities remain active at all times unless disabled by another effect.
 
 Ultimate abilities are among the strongest abilities available.
 
-Characteristics:
+Characteristics may include:
 
 - High Ability Point Cost
 - High Attribute Requirements
 - Powerful Effects
 - Significant Resource Costs
-- Long Cooldowns
+- Explicit Special Restrictions
 
 Every class has multiple Ultimate abilities to choose from.
 
@@ -203,9 +187,9 @@ Every class has multiple Ultimate abilities to choose from.
 
 # 10. Resource Costs
 
-Abilities consume resources.
+Abilities consume the user's class resource.
 
-Examples include:
+Default examples include:
 
 - Mana
 - Stamina
@@ -216,9 +200,17 @@ Examples include:
 - Divine Power
 - Shadow Energy
 
-Players cannot use an ability without sufficient resources.
+Each class has one primary resource defined in `Classes.md`.
 
-Resource values are tracked exactly according to the Hardcore Rules.
+Unless an ability explicitly states otherwise, its Resource Cost is paid from the user's primary class-resource pool.
+
+The **Mana attribute** in `Stats.md` determines the maximum size of that pool regardless of the pool's displayed name:
+
+`Maximum Class Resource = floor(Mana / 2) x 10`
+
+For example, a Warrior with Mana 10 has 50 Stamina, while a Mage with Mana 10 has 50 Mana.
+
+Players cannot use an ability without sufficient resources. An invalid ability attempt does not spend the resource or primary action.
 
 ---
 
@@ -226,7 +218,7 @@ Resource values are tracked exactly according to the Hardcore Rules.
 
 Abilities may belong to one or more categories.
 
-Examples:
+Examples include:
 
 - Offensive
 - Defensive
@@ -256,6 +248,9 @@ The AI determines:
 - Resource Cost
 - Ability Point Cost
 - Attribute Requirements
+- Special Restrictions when genuinely needed
+
+The AI may not invent a different class-resource pool during play. It must use the character's established class resource unless the ability itself explicitly introduces a special resource mechanic.
 
 ---
 
@@ -268,6 +263,7 @@ Design Goals
 - Powerful abilities require meaningful investment.
 - Every build should have strengths and weaknesses.
 - Player creativity should always be rewarded.
+- Resource cost, action economy, positioning, targeting, and requirements are preferred balancing tools over cooldowns.
 
 ---
 
@@ -283,7 +279,7 @@ Possible additions:
 
 ---
 
-# Ability Scaling
+# 15. Ability Scaling
 
 Abilities should remain useful throughout an entire campaign without requiring players to repeatedly replace their favorite abilities.
 
@@ -311,33 +307,29 @@ Example scaling statistics include:
 - Range
 - Number of Targets
 - Area of Effect
-- Resource Cost (when appropriate)
+- Resource Cost when appropriate
 
 Scaling should preserve an ability's identity while ensuring it remains relevant throughout progression.
 
 ---
 
-# Cooldowns
+# 16. Usage Restrictions
 
-Some abilities require time before they may be used again.
+There is **no universal cooldown system** for normal abilities.
 
-Cooldowns exist independently from resource costs.
+Exceptionally powerful or unusual abilities may define explicit restrictions such as:
 
-Common cooldown types include:
-
-- No Cooldown
-- 1 Turn
-- Multiple Turns
 - Once Per Encounter
 - Once Per Rest
 - Once Per Day
 - Limited Charges
+- Requires a specific condition or setup
 
-Cooldowns should be used primarily to balance powerful or game-changing abilities rather than ordinary attacks.
+These restrictions belong to the individual ability and must be visible to the player. They are separate from normal resource costs.
 
 ---
 
-# Targeting Rules
+# 17. Targeting Rules
 
 Every ability defines how it selects valid targets.
 
@@ -369,7 +361,7 @@ Targeting should remain consistent so both players and the AI Game Master can re
 
 ---
 
-# Ability Interactions
+# 18. Ability Interactions
 
 Abilities may interact with other abilities, status effects, environmental hazards, equipment, or world objects.
 
@@ -387,7 +379,7 @@ The AI Game Master may create additional logical interactions provided they rema
 
 ---
 
-# Ability Templates
+# 19. Ability Templates
 
 Every ability should follow a standardized structure.
 
@@ -412,10 +404,10 @@ Every ability should follow a standardized structure.
 ## Usage
 
 - Resource Cost
-- Cooldown
 - Valid Targets
 - Range
 - Area of Effect
+- Special Restrictions (if any)
 
 ---
 
