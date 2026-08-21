@@ -1,6 +1,6 @@
 # Abilities.md
 
-Version: 1.4
+Version: 1.5
 Status: In Development
 
 ---
@@ -103,6 +103,8 @@ AP Cost and Resource Cost are separate progression gates. Unlocking a 15 AP Lege
 
 Every ability must show exact mechanics rather than only flavor text.
 
+**Damage and healing use dice expressions rather than fixed totals.** Valid examples include `1d3`, `1d4`, `1d6`, `1d8`, `2d6`, `2d8`, and larger expressions appropriate to stronger tiers. A damaging ability should never display a fixed value such as `Damage 6`; it should display a roll such as `Damage 1d6`.
+
 Examples:
 
 `Roadside Feint — Damage 1d6 | Move 1 square | Range 1 | Cost 10 Trailmarks | Beginner | 1 AP`
@@ -131,9 +133,11 @@ When the player opens the ability-learning screen, the AI may generate class-spe
 
 The AI may generate only tiers currently unlocked by character level and must not repeat abilities the character already knows.
 
-AI-generated abilities follow the same tier, AP, Resource, and display rules as handcrafted abilities.
+AI-generated abilities follow the same tier, AP, Resource, dice-damage, and display rules as handcrafted abilities.
 
 The AI must determine and store the name, description, tier, Resource Cost, type/category, targeting, range, exact mechanical effects, scaling attributes, requirements, and any explicit special restrictions. AP Cost is derived from tier by Python.
+
+Any generated `damage` or `healing` field must be a valid dice expression rather than a fixed number. Python normalizes legacy fixed numeric values into dice expressions before resolution.
 
 The AI may not use vague wording in place of mechanical values.
 
@@ -172,5 +176,7 @@ Every ability should store enough structured data for deterministic resolution:
 - attack/scaling attribute when applicable
 - requirements
 - special restrictions when applicable
+
+`damage` and `healing` are stored as dice expressions whenever they are present.
 
 Python owns the actual mechanical resolution. AI narration must obey the stored values.
