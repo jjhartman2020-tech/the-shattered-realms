@@ -1,4 +1,4 @@
-"""Runtime integration for the five-slot Armor HP system."""
+"""Runtime integration for Armor HP, shield HP, and armor stat bonuses."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -78,6 +78,9 @@ def _inject_player_armor(game_master, combat: Dict) -> None:
     player = game_master.state.data.get("player", {}); actor = _player_actor(combat, str(player.get("name") or "Traveler"))
     if not actor: return
     actor["equipped_armor"] = deepcopy(player.get("equipped_armor", {})); actor["armor_set_name"] = player.get("armor_set_name")
+    actor["equipped_shield"] = deepcopy(player.get("equipped_shield")) if isinstance(player.get("equipped_shield"), dict) else None
+    actor["shield_hp"] = max(0, int(player.get("shield_hp", 0) or 0))
+    actor["max_shield_hp"] = max(actor["shield_hp"], int(player.get("max_shield_hp", actor["shield_hp"]) or actor["shield_hp"]))
     actor["base_attributes_without_armor"] = deepcopy(actor.get("attributes", {})); _refresh_actor_armor_stats(actor)
     base = int(player.get("base_movement_without_armor", actor.get("movement", 1)) or 1); actor["base_movement_without_armor"] = base
     actor["movement"] = effective_movement(base, actor.get("equipped_armor", {}))
@@ -87,9 +90,55 @@ def _sync_player_from_combat(game_master, combat: Dict) -> None:
     player = game_master.state.data.get("player", {}); actor = _player_actor(combat, str(player.get("name") or "Traveler"))
     if not actor: return
     player["hp"] = int(actor.get("hp", player.get("hp", 0)) or 0); player["resource"] = int(actor.get("resource", player.get("resource", 0)) or 0); player["mana"] = player["resource"]
+    player["shield_hp"] = max(0, int(actor.get("shield_hp", player.get("shield_hp", 0)) or 0))
+    player["max_shield_hp"] = max(player["shield_hp"], int(actor.get("max_shield_hp", player.get("max_shield_hp", player["shield_hp"])) or player["shield_hp"]))
+    if isinstance(actor.get("equipped_shield"), dict): player["equipped_shield"] = deepcopy(actor["equipped_shield"])
     if isinstance(actor.get("equipped_armor"), dict):
         player["equipped_armor"] = deepcopy(actor["equipped_armor"]); player["armor_set_name"] = actor.get("armor_set_name"); player["base_movement_without_armor"] = int(actor.get("base_movement_without_armor", player.get("base_movement_without_armor", 1)) or 1); sync_armor_summary(player)
     player["movement"] = int(actor.get("movement", player.get("movement", 1)) or 1); game_master.state.save()
+
+
+def _apply_shield_then_armor(target: Dict, damage: int, *, damage_type: str | None = None) -> Dict:
+    """Apply damage in the authoritative order: Shield HP -> Armor HP -> HP."""
+    incoming = max(0, int(damage or 0))
+    hp_before = int(target.get("hp", 0) or 0)
+    shield_before = max(0, int(target.get("shield_hp", 0) or 0))
+    max_shield = max(shield_before, int(target.get("max_shield_hp", shield_before) or shield_before))
+    shield_absorbed = min(shield_before, incoming)
+    target["shield_hp"] = shield_before - shield_absorbed
+    remaining = incoming - shield_absorbed
+
+    sync_armor_summary(target)
+    armor_before = int(target.get("armor", 0) or 0)
+    max_armor = int(target.get("max_armor", 0) or 0)
+    armor_absorbed = 0; broken = []
+
+    if remaining > 0 and max_armor > 0 and isinstance(target.get("equipped_armor"), dict):
+        split = apply_damage_to_armor(target, remaining, damage_type=damage_type)
+        armor_absorbed = int(split.get("armor_absorbed", 0) or 0)
+        hp_damage = int(split.get("hp_damage", 0) or 0)
+        broken = split.get("broken_pieces", []) or []
+    else:
+        hp_damage = remaining
+        target["hp"] = max(0, hp_before - hp_damage)
+        target["defeated"] = target["hp"] <= 0
+        sync_armor_summary(target)
+
+    return {
+        "incoming_damage": incoming,
+        "shield_absorbed": shield_absorbed,
+        "shield_before": shield_before,
+        "shield_after": int(target.get("shield_hp", 0) or 0),
+        "max_shield": max_shield,
+        "armor_absorbed": armor_absorbed,
+        "armor_before": armor_before,
+        "armor_after": int(target.get("armor", 0) or 0),
+        "max_armor": int(target.get("max_armor", max_armor) or max_armor),
+        "hp_damage": hp_damage,
+        "hp_before": hp_before,
+        "hp_after": int(target.get("hp", 0) or 0),
+        "broken_pieces": broken,
+    }
 
 
 def _retrofit_armor_after_damage(combat: Dict, outcome: Dict, target_name: str, *, damage_type: str | None = None) -> Dict:
@@ -97,15 +146,23 @@ def _retrofit_armor_after_damage(combat: Dict, outcome: Dict, target_name: str, 
     damage = max(0, int(outcome.get("damage", 0) or 0))
     if damage <= 0: return outcome
     target = _player_actor(combat, target_name)
-    if not target or not isinstance(target.get("equipped_armor"), dict): return outcome
-    sync_armor_summary(target)
-    if int(target.get("max_armor", 0) or 0) <= 0: return outcome
+    if not target: return outcome
+    has_shield = int(target.get("max_shield_hp", 0) or 0) > 0
+    has_armor = isinstance(target.get("equipped_armor"), dict) and bool(target.get("equipped_armor"))
+    if not has_shield and not has_armor: return outcome
+
+    # The core resolver already removed the full damage from HP. Restore that damage,
+    # then re-apply it through Shield -> Armor -> HP.
     after_engine = int(target.get("hp", 0) or 0); max_hp = int(target.get("max_hp", after_engine) or after_engine)
     target["hp"] = min(max_hp, after_engine + damage); target["defeated"] = False
-    split = apply_damage_to_armor(target, damage, damage_type=damage_type)
+    split = _apply_shield_then_armor(target, damage, damage_type=damage_type)
     _refresh_actor_armor_stats(target)
     base = int(target.get("base_movement_without_armor", target.get("movement", 1)) or 1); target["movement"] = effective_movement(base, target.get("equipped_armor", {}))
-    outcome.update({"armor_absorbed": split["armor_absorbed"], "hp_damage": split["hp_damage"], "armor_before": split["armor_before"], "armor_after": split["armor_after"], "target_armor": split["armor_after"], "target_max_armor": split["max_armor"], "target_hp": split["hp_after"], "target_max_hp": int(target.get("max_hp", split["hp_after"])), "target_defeated": bool(target.get("defeated")), "broken_armor_pieces": split["broken_pieces"], "resisted_by_armor": 0})
+    outcome.update({
+        "shield_absorbed": split["shield_absorbed"], "shield_before": split["shield_before"], "shield_after": split["shield_after"], "target_shield": split["shield_after"], "target_max_shield": split["max_shield"],
+        "armor_absorbed": split["armor_absorbed"], "hp_damage": split["hp_damage"], "armor_before": split["armor_before"], "armor_after": split["armor_after"], "target_armor": split["armor_after"], "target_max_armor": split["max_armor"],
+        "target_hp": split["hp_after"], "target_max_hp": int(target.get("max_hp", split["hp_after"])), "target_defeated": bool(target.get("defeated")), "broken_armor_pieces": split["broken_pieces"], "resisted_by_armor": 0,
+    })
     _repair_combat_end_state(combat); return outcome
 
 
