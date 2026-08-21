@@ -2,6 +2,7 @@
 from __future__ import annotations
 from copy import deepcopy
 import json
+import re
 from typing import Dict, List
 
 ARMOR_SLOTS = ("helmet", "breastplate", "pants", "gloves", "boots")
@@ -17,11 +18,11 @@ def normalize_armor_piece(raw: Dict) -> Dict:
     piece["slot"] = slot
     piece["type"] = "armor"
     piece["armor_hp"] = max(0, int(piece.get("armor_hp", 0) or 0))
-    piece["max_armor_hp"] = piece["armor_hp"]
+    piece["max_armor_hp"] = max(piece["armor_hp"], int(piece.get("max_armor_hp", piece["armor_hp"]) or 0))
     piece["weight"] = max(0, int(piece.get("weight", 0) or 0))
     effects = piece.get("effects", [])
     piece["effects"] = effects if isinstance(effects, list) else ([str(effects)] if effects else [])
-    piece.pop("armor_bonus", None)  # Armor never adds AC in this ruleset.
+    piece.pop("armor_bonus", None)
     return piece
 
 
@@ -32,6 +33,123 @@ def armor_totals(equipped: Dict) -> Dict:
         "max_armor": sum(max(0, int(p.get("max_armor_hp", p.get("armor_hp", 0)) or 0)) for p in pieces),
         "weight": sum(max(0, int(p.get("weight", 0) or 0)) for p in pieces),
     }
+
+
+def armor_effects(equipped: Dict) -> Dict:
+    """Convert armor text effects into a few engine-readable beginner bonuses."""
+    movement = 0
+    resistances: Dict[str, int] = {}
+    for piece in (equipped or {}).values():
+        if not isinstance(piece, dict) or int(piece.get("armor_hp", 0) or 0) <= 0:
+            continue
+        for raw in piece.get("effects", []):
+            text = str(raw).strip().lower()
+            move = re.search(r"([+-]\d+)\s*(?:movement|move)(?:\s+square)?", text)
+            if move:
+                movement += int(move.group(1))
+            resist = re.search(r"(\d+)\s*%\s*([a-z -]+?)\s*resistance", text)
+            if resist:
+                kind = resist.group(2).strip().replace(" ", "_")
+                resistances[kind] = min(50, resistances.get(kind, 0) + int(resist.group(1)))
+    return {"movement_bonus": movement, "resistances": resistances}
+
+
+def armor_weight_movement_penalty(weight: int) -> int:
+    """Heavy equipment slows movement without making beginner armor oppressive."""
+    weight = max(0, int(weight or 0))
+    if weight >= 30: return 3
+    if weight >= 22: return 2
+    if weight >= 14: return 1
+    return 0
+
+
+def effective_movement(base_movement: int, equipped: Dict) -> int:
+    totals = armor_totals(equipped)
+    effects = armor_effects(equipped)
+    return max(1, int(base_movement) + int(effects["movement_bonus"]) - armor_weight_movement_penalty(totals["weight"]))
+
+
+def sync_armor_summary(actor: Dict) -> Dict:
+    equipped = actor.get("equipped_armor") if isinstance(actor.get("equipped_armor"), dict) else {}
+    totals = armor_totals(equipped)
+    actor["armor"] = totals["armor"]
+    actor["max_armor"] = totals["max_armor"]
+    actor["armor_weight"] = totals["weight"]
+    actor["armor_effects"] = armor_effects(equipped)
+    return totals
+
+
+def apply_damage_to_armor(actor: Dict, damage: int, *, damage_type: str | None = None) -> Dict:
+    """Absorb damage with Armor HP first, then overflow into real HP."""
+    incoming = max(0, int(damage or 0))
+    equipped = actor.get("equipped_armor") if isinstance(actor.get("equipped_armor"), dict) else {}
+    sync_armor_summary(actor)
+    armor_before = int(actor.get("armor", 0) or 0)
+    hp_before = int(actor.get("hp", 0) or 0)
+
+    # Optional typed resistance from intact armor pieces. Normal physical damage has no extra armor resistance.
+    resisted = 0
+    if damage_type:
+        kind = str(damage_type).strip().lower().replace(" ", "_")
+        pct = int((actor.get("armor_effects") or {}).get("resistances", {}).get(kind, 0) or 0)
+        resisted = round(incoming * min(50, max(0, pct)) / 100)
+        incoming = max(0, incoming - resisted)
+
+    absorbed = min(armor_before, incoming)
+    overflow = incoming - absorbed
+
+    # Drain individual pieces in a predictable order, largest protective piece first.
+    remaining = absorbed
+    pieces = sorted(
+        [p for p in equipped.values() if isinstance(p, dict)],
+        key=lambda p: (str(p.get("slot")) != "breastplate", -int(p.get("armor_hp", 0) or 0)),
+    )
+    broken = []
+    for piece in pieces:
+        if remaining <= 0: break
+        current = max(0, int(piece.get("armor_hp", 0) or 0))
+        take = min(current, remaining)
+        piece["armor_hp"] = current - take
+        remaining -= take
+        if current > 0 and piece["armor_hp"] == 0:
+            broken.append(str(piece.get("name") or piece.get("slot") or "Armor piece"))
+
+    actor["hp"] = max(0, hp_before - overflow)
+    actor["defeated"] = actor["hp"] <= 0
+    sync_armor_summary(actor)
+    return {
+        "incoming_damage": int(damage or 0),
+        "resisted_damage": resisted,
+        "armor_absorbed": absorbed,
+        "hp_damage": overflow,
+        "armor_before": armor_before,
+        "armor_after": int(actor.get("armor", 0)),
+        "max_armor": int(actor.get("max_armor", 0)),
+        "hp_before": hp_before,
+        "hp_after": int(actor.get("hp", 0)),
+        "broken_pieces": broken,
+    }
+
+
+def repair_armor(actor: Dict, amount: int | None = None) -> Dict:
+    equipped = actor.get("equipped_armor") if isinstance(actor.get("equipped_armor"), dict) else {}
+    before = armor_totals(equipped)["armor"]
+    remaining = None if amount is None else max(0, int(amount))
+    repaired = 0
+    for slot in ARMOR_SLOTS:
+        piece = equipped.get(slot)
+        if not isinstance(piece, dict): continue
+        current = max(0, int(piece.get("armor_hp", 0) or 0))
+        maximum = max(current, int(piece.get("max_armor_hp", current) or current))
+        missing = maximum - current
+        add = missing if remaining is None else min(missing, remaining)
+        piece["armor_hp"] = current + add
+        repaired += add
+        if remaining is not None:
+            remaining -= add
+            if remaining <= 0: break
+    sync_armor_summary(actor)
+    return {"repaired": repaired, "armor_before": before, "armor_after": actor.get("armor", 0), "max_armor": actor.get("max_armor", 0)}
 
 
 def _fallback_sets(description: str = "") -> List[Dict]:
@@ -68,7 +186,6 @@ def _normalize_set(raw: Dict, target_total: int) -> Dict:
     for slot in ARMOR_SLOTS:
         p = by_slot.get(slot, normalize_armor_piece({"name": slot.title(), "slot": slot, "armor_hp": 0, "weight": 0, "effects": []}))
         pieces.append(p)
-    # Hard beginner balance guard: whole starting set must total 10-20 Armor HP.
     target_total = max(STARTING_ARMOR_MIN, min(STARTING_ARMOR_MAX, int(target_total)))
     current = sum(p["armor_hp"] for p in pieces)
     if current <= 0:
@@ -90,7 +207,7 @@ def generate_starting_armor(provider, world: Dict, player: Dict, request: str = 
     if client is None or not model:
         sets = _fallback_sets(request)
         return [_normalize_set(s, total) for s, total in zip(sets, (14,17,20))]
-    instructions = """Return ONLY JSON. Generate beginner armor for a genre-neutral RPG using the confirmed world and character. Armor NEVER adds AC. Armor is a separate health bar that absorbs damage before HP. There are exactly five slots: helmet, breastplate, pants, gloves, boots. A full STARTING set must total only 10-20 Armor HP so beginner armor is not overpowered. Breastplate usually provides the most Armor HP. Pieces may have small thematic effects such as +1 movement square or modest resistance, but beginner effects must be weak. Heavier protection may have movement penalties. Every piece needs name, slot, armor_hp, weight, effects. Do not add permanent core-stat increases. If custom_request is supplied, honor its appearance/theme but BALANCE its mechanics to beginner strength. If custom_mode=true return exactly 1 set. Otherwise return exactly 3 meaningfully different choices. Top-level JSON: {\"sets\":[{\"name\":...,\"description\":...,\"pieces\":[...]}]}."""
+    instructions = """Return ONLY JSON. Generate beginner armor for a genre-neutral RPG using the confirmed world and character. Armor NEVER adds AC. Armor is a separate health bar that absorbs damage before HP. There are exactly five slots: helmet, breastplate, pants, gloves, boots. A full STARTING set must total only 10-20 Armor HP so beginner armor is not overpowered. Breastplate usually provides the most Armor HP. Pieces may have small thematic effects such as +1 movement square or 5-15% resistance to one damage type, but beginner effects must be weak. Heavier protection may have movement penalties. Every piece needs name, slot, armor_hp, weight, effects. Do not add permanent core-stat increases. If custom_request is supplied, honor its appearance/theme but BALANCE its mechanics to beginner strength. If custom_mode=true return exactly 1 set. Otherwise return exactly 3 meaningfully different choices. Top-level JSON: {\"sets\":[{\"name\":...,\"description\":...,\"pieces\":[...]}]}."""
     payload = {"world": world, "player": {"class": player.get("class"), "stats": player.get("stats"), "appearance": player.get("appearance")}, "custom_mode": custom, "custom_request": request}
     response = client.responses.create(model=model, instructions=instructions, input=json.dumps(payload, ensure_ascii=False, default=str))
     try: data = json.loads(response.output_text.strip())
@@ -100,6 +217,24 @@ def generate_starting_armor(provider, world: Dict, player: Dict, request: str = 
         sets = _fallback_sets(request)[:1] if custom else _fallback_sets()
     targets = [15] if custom else [14,17,20]
     return [_normalize_set(s, targets[min(i, len(targets)-1)]) for i, s in enumerate(sets)]
+
+
+def print_armor(actor: Dict) -> None:
+    equipped = actor.get("equipped_armor") if isinstance(actor.get("equipped_armor"), dict) else {}
+    totals = sync_armor_summary(actor)
+    print(f"\nARMOR — {actor.get('armor_set_name') or 'Mixed Set'}")
+    print(f"Armor HP: {totals['armor']}/{totals['max_armor']} | Weight: {totals['weight']}")
+    effects = armor_effects(equipped)
+    penalty = armor_weight_movement_penalty(totals["weight"])
+    print(f"Movement from armor: {effects['movement_bonus']:+d} effect, -{penalty} from weight")
+    for slot in ARMOR_SLOTS:
+        p = equipped.get(slot)
+        if not isinstance(p, dict):
+            print(f"  {slot.title():<12} Empty")
+            continue
+        fx = ", ".join(str(x) for x in p.get("effects", [])) or "none"
+        status = "BROKEN" if int(p.get("armor_hp", 0) or 0) <= 0 else "active"
+        print(f"  {slot.title():<12} {p.get('name')} | {p.get('armor_hp',0)}/{p.get('max_armor_hp',0)} Armor | Weight {p.get('weight',0)} | {status} | {fx}")
 
 
 def _print_set(armor_set: Dict) -> None:
@@ -113,8 +248,8 @@ def run_starting_armor_creation(game_master) -> Dict:
     player = game_master.state.data.setdefault("player", {})
     world = game_master.state.data.get("world_profile") or game_master.state.data.get("world") or {}
     print("\n" + "="*48 + "\nSTARTING ARMOR\n" + "="*48)
-    print("Armor is a separate health bar and does NOT increase AC. Your beginner armor will total only 10-20 Armor HP.")
-    print("Slots: Helmet, Breastplate, Pants, Gloves, Boots.\n")
+    print("Armor is a separate health bar and does NOT increase AC. Beginner armor totals only 10-20 Armor HP.")
+    print("Slots: Helmet, Breastplate, Pants, Gloves, Boots. Broken pieces stop giving effects until repaired.\n")
     while True:
         mode = input("1. Describe your own armor\n2. Let the AI give you 3 armor options\nChoose 1 or 2: ").strip()
         if mode in {"1","2"}: break
@@ -135,13 +270,13 @@ def run_starting_armor_creation(game_master) -> Dict:
             except ValueError: idx = -1
             if 0 <= idx < len(choices): chosen = choices[idx]; break
     equipped = {p["slot"]: deepcopy(p) for p in chosen["pieces"]}
-    totals = armor_totals(equipped)
     player["equipped_armor"] = equipped
     player["armor_set_name"] = chosen.get("name")
-    player["armor"] = totals["armor"]
-    player["max_armor"] = totals["max_armor"]
-    player["armor_weight"] = totals["weight"]
+    sync_armor_summary(player)
+    base_movement = int(player.get("movement", 1) or 1)
+    player["base_movement_without_armor"] = base_movement
+    player["movement"] = effective_movement(base_movement, equipped)
     player.setdefault("inventory", []).extend(deepcopy(chosen["pieces"]))
     game_master.state.save()
-    print(f"\nEquipped {chosen.get('name')}: Armor {player['armor']}/{player['max_armor']} | Total Weight {player['armor_weight']}")
+    print(f"\nEquipped {chosen.get('name')}: Armor {player['armor']}/{player['max_armor']} | Weight {player['armor_weight']} | Movement {player['movement']}")
     return deepcopy(chosen)
