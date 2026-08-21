@@ -13,7 +13,22 @@ class AIProvider(Protocol):
 class DevelopmentProvider:
     def respond(self, context: Dict) -> Dict:
         action = context.get("player_action", "").strip()
-        return {"narration": "The Game Master core received your action and assembled the campaign context. Set OPENAI_API_KEY to enable the live AI.", "player_action": action, "requires_roll": False, "roll": None, "combat_request": None, "state_changes": [], "memories": [], "world_notes": [], "suggested_actions": ["Look around", "Talk to someone nearby", "Move toward the most interesting lead"], "debug": {"provider": "development"}}
+        return {
+            "narration": "The Game Master core received your action and assembled the campaign context. Set OPENAI_API_KEY to enable the live AI.",
+            "player_action": action,
+            "requires_roll": False,
+            "roll": None,
+            "combat_request": None,
+            "state_changes": [],
+            "memories": [],
+            "world_notes": [],
+            "suggested_actions": [
+                {"text": "Look around", "requires_roll": False, "skill": None},
+                {"text": "Talk to someone nearby", "requires_roll": False, "skill": None},
+                {"text": "Move toward the most interesting lead", "requires_roll": False, "skill": None},
+            ],
+            "debug": {"provider": "development"},
+        }
 
 
 class OpenAIProvider:
@@ -38,7 +53,9 @@ GAME MASTER / STORY CONTROL
 - Keep player agency sacred: never decide the player's important choices, dialogue, feelings, beliefs, or voluntary actions for them.
 - Stop for player input at meaningful decision points.
 - Questions should normally be decision prompts such as 'What do you do?' rather than requests for the player to create story facts.
-- Return exactly 3 concise suggested_actions that make sense RIGHT NOW. They are suggestions only; the player may type anything else.
+- Return exactly 3 concise suggested actions that make sense RIGHT NOW. They are suggestions only; the player may type anything else.
+- For EACH suggested action, also predict whether that exact action would normally require a non-combat check if attempted immediately. If yes, include the most likely skill. If no, set skill to null.
+- This suggestion metadata is a preview, not a guaranteed outcome. Circumstances may change and Python/the later action-resolution pass remains authoritative.
 
 NARRATION STYLE / CLARITY
 - Gameplay narration must be quick and easy to understand. Clarity matters more than fancy writing.
@@ -105,7 +122,7 @@ ENCOUNTER RESET
 - A reset/reconfiguration does not also resolve another combat action in the same response.
 
 Return ONLY valid JSON with this top-level shape:
-{\"narration\":\"player-facing description that advances the scene\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[],\"suggested_actions\":[\"specific option 1\",\"specific option 2\",\"specific option 3\"]}
+{\"narration\":\"player-facing description that advances the scene\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[],\"suggested_actions\":[{\"text\":\"specific option 1\",\"requires_roll\":true,\"skill\":\"athletics\"},{\"text\":\"specific option 2\",\"requires_roll\":false,\"skill\":null},{\"text\":\"specific option 3\",\"requires_roll\":true,\"skill\":\"stealth\"}]}
 When requires_roll=true, roll contains reason, difficulty, and skill. Never reveal private chain-of-thought.
 """
         response = self.client.responses.create(model=self.model, instructions=system_instructions, input=serialize_context(context))
@@ -122,10 +139,26 @@ When requires_roll=true, roll contains reason, difficulty, and skill. Never reve
         result.setdefault("state_changes", [])
         result.setdefault("memories", [])
         result.setdefault("world_notes", [])
+
         suggestions = result.get("suggested_actions")
         if not isinstance(suggestions, list):
             suggestions = []
-        result["suggested_actions"] = [str(item).strip() for item in suggestions if str(item).strip()][:3]
+        normalized = []
+        for item in suggestions[:3]:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                requires_roll = bool(item.get("requires_roll", False))
+                skill = str(item.get("skill") or "").strip().lower().replace("_", " ") or None
+                if not requires_roll:
+                    skill = None
+                normalized.append({"text": text, "requires_roll": requires_roll, "skill": skill})
+            else:
+                text = str(item).strip()
+                if text:
+                    normalized.append({"text": text, "requires_roll": False, "skill": None})
+        result["suggested_actions"] = normalized
         result["debug"] = {"provider": "openai", "model": self.model, "rules_found": len(context.get("relevant_rules", [])), "memories_found": len(context.get("relevant_memories", []))}
         return result
 
