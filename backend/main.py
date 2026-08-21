@@ -94,6 +94,12 @@ def main() -> None:
         if lowered in {"spend ap", "spend ability points", "learn ability", "learn abilities", "ability shop"}:
             player = run_ap_spending_screen(game_master); _print_progress(player); continue
         if lowered in {"start game", "start new adventure", "new game", "new adventure"}:
+            # A true new game must not inherit any locations, items, NPCs, quests,
+            # encounters, or AI memories from the previous campaign.
+            game_master.state.reset_for_new_campaign()
+            game_master.memory.clear()
+            print("\nStarting a completely fresh campaign. Previous campaign state and memory were cleared.")
+
             world = run_world_creation(game_master)
             print(f"\nWorld confirmed: {world.get('name', 'Your World')}")
             print("Now create the character who will live in it.\n")
