@@ -36,10 +36,10 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
         ),
         "abilities": [
             {"name": "Committed Strike", "description": "A forceful single-target attack.", "resource_cost": 10, "target": "enemy", "range": 1, "attack_attribute": "strength", "damage": "1d8"},
-            {"name": "Quickstep", "description": "A burst of controlled movement.", "resource_cost": 10, "target": "self", "range": 0},
+            {"name": "Quickstep", "description": "A burst of controlled movement.", "resource_cost": 5, "target": "self", "range": 0},
             {"name": "Focused Shot", "description": "A precise ranged attack.", "resource_cost": 10, "target": "enemy", "range": 6, "attack_attribute": "dexterity", "damage": "1d6"},
             {"name": "Arc Spark", "description": "A basic magical attack.", "resource_cost": 10, "target": "enemy", "range": 5, "attack_attribute": "magic", "damage": "1d6"},
-            {"name": "Brace", "description": "Reinforce yourself against an incoming threat.", "resource_cost": 10, "target": "self", "range": 0},
+            {"name": "Brace", "description": "Reinforce yourself against an incoming threat.", "resource_cost": 5, "target": "self", "range": 0},
             {"name": "Second Wind", "description": "A small restorative surge.", "resource_cost": 15, "target": "self", "range": 0},
         ],
         "starter_kits": [
@@ -58,12 +58,43 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
     }
 
 
+def _normalize_starter_ability_costs(abilities: List[Dict], max_resource: int) -> List[Dict]:
+    """Force generated starter costs into the game's real resource-point scale.
+
+    The model sometimes returns tabletop-style costs such as 1 or 2. Shattered
+    Realms resources use actual point pools (10, 20, 50, etc.), so beginner
+    abilities use multiples of 5 and must be affordable by the confirmed build.
+    """
+    normalized: List[Dict] = []
+    for raw in abilities:
+        ability = deepcopy(raw) if isinstance(raw, dict) else {}
+        raw_cost = max(0, int(ability.get("resource_cost", 0) or 0))
+        if max_resource <= 0:
+            cost = 0
+        else:
+            # Treat accidental 1/2/3 style costs as 5/10/15 resource points.
+            if 1 <= raw_cost <= 3:
+                raw_cost *= 5
+            if raw_cost <= 0:
+                raw_cost = 5
+            # Starter costs live on 5-point increments and cannot exceed the pool.
+            cost = max(5, int(round(raw_cost / 5.0)) * 5)
+            cost = min(cost, max_resource)
+        ability["resource_cost"] = cost
+        normalized.append(ability)
+    return normalized
+
+
 def generate_character_package(provider, *, name: str, appearance: str, stats: Dict[str, int]) -> Dict:
     """Ask the live model for a strictly structured character package."""
     client = getattr(provider, "client", None)
     model = getattr(provider, "model", None)
+    sheet = character_sheet_channels(stats, level=1)
+    max_resource = int(sheet["max_resource_base"])
     if client is None or not model:
-        return _fallback_generation(name, appearance, stats)
+        generated = _fallback_generation(name, appearance, stats)
+        generated["abilities"] = _normalize_starter_ability_costs(generated["abilities"], max_resource)
+        return generated
 
     instructions = """You generate starting characters for The Shattered Realms.
 Return ONLY valid JSON. Do not include markdown.
@@ -72,23 +103,37 @@ Use the confirmed 13-stat build to inspire, but not mechanically alter, the char
 Generate a unique beginner-friendly class, a thematic class-resource name, and a backstory.
 Generate exactly 6 beginner abilities. They must be meaningfully different and suitable for the generated class.
 Each ability needs name, description, resource_cost, target, range, and may include attack_attribute and damage.
+RESOURCE COSTS ARE REAL RESOURCE POINTS, NOT 1/2/3 tabletop slots. Costs must be multiples of 5. Beginner abilities should normally cost 5, 10, or 15 resource points and should be affordable with the character's confirmed maximum resource. Do not output costs of 1, 2, or 3.
 attack_attribute may be strength, dexterity, or magic when an attack roll is appropriate.
 Generate exactly 3 starter kits, each with a name and 3-4 ordinary starter items.
 Generate exactly 6 special starter equipment choices, each with name and description.
 Do not give permanent stat increases in starter equipment.
 Top-level JSON keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
-    payload = {"name": name, "appearance": appearance, "confirmed_stats": stats}
+    payload = {
+        "name": name,
+        "appearance": appearance,
+        "confirmed_stats": stats,
+        "derived_character_values": {
+            "max_hp": int(sheet["max_health_base"]),
+            "max_resource": max_resource,
+            "resource_regeneration_per_round": int(sheet["resource_regeneration_per_round"]),
+            "movement": int(sheet["movement"]),
+            "initiative_bonus": int(sheet["initiative_bonus"]),
+            "critical_chance_percent": int(sheet["critical_chance_percent"]),
+        },
+    }
     response = client.responses.create(model=model, instructions=instructions, input=json.dumps(payload, ensure_ascii=False, indent=2))
     raw = response.output_text.strip()
     try:
         generated = json.loads(raw)
     except json.JSONDecodeError:
-        return _fallback_generation(name, appearance, stats)
+        generated = _fallback_generation(name, appearance, stats)
 
     if not isinstance(generated, dict):
-        return _fallback_generation(name, appearance, stats)
+        generated = _fallback_generation(name, appearance, stats)
     if len(generated.get("abilities", [])) != 6 or len(generated.get("starter_kits", [])) != 3 or len(generated.get("special_equipment", [])) != 6:
-        return _fallback_generation(name, appearance, stats)
+        generated = _fallback_generation(name, appearance, stats)
+    generated["abilities"] = _normalize_starter_ability_costs(generated.get("abilities", []), max_resource)
     return generated
 
 
@@ -123,7 +168,6 @@ def _allocate_attributes() -> Dict[str, int]:
     print(f"\nYou have {STARTING_ATTRIBUTE_POINTS} AP to spend across {len(ATTRIBUTE_NAMES)} stats.")
     print("Each stat has a natural cap of 100. You must spend all starting AP before confirming.\n")
     for index, stat in enumerate(ATTRIBUTE_NAMES):
-        stats_left = len(ATTRIBUTE_NAMES) - index - 1
         while True:
             raw = input(f"{stat.title()} (remaining AP: {remaining}): ").strip()
             try:
@@ -155,6 +199,20 @@ def _allocate_attributes() -> Dict[str, int]:
     return normalize_attributes(allocation)
 
 
+def _print_derived_sheet(sheet: Dict, resource_name: str = "Resource") -> None:
+    """Show the important values produced by the confirmed attributes."""
+    print("\nDERIVED CHARACTER STATS")
+    print(f"  Max HP:                  {int(sheet['max_health_base'])}")
+    print(f"  Max {resource_name}:".ljust(28) + f"{int(sheet['max_resource_base'])}")
+    print(f"  {resource_name} Regen/Round:".ljust(28) + f"{int(sheet['resource_regeneration_per_round'])}")
+    print(f"  Movement:                {int(sheet['movement'])} squares")
+    print(f"  Initiative Bonus:        +{int(sheet['initiative_bonus'])}")
+    print(f"  Critical Chance:         {int(sheet['critical_chance_percent'])}%")
+    print(f"  Physical Resistance:     {int(sheet['physical_resistance_percent'])}%")
+    print(f"  Status Resistance:       {int(sheet['status_resistance_percent'])}%")
+    print(f"  Defend Action AC Bonus:  +{int(sheet['defend_action_ac_bonus'])}")
+
+
 def run_character_creation(game_master) -> Dict:
     """Run the current CLI character creator and persist the finished character."""
     print("\n" + "=" * 48)
@@ -170,22 +228,24 @@ def run_character_creation(game_master) -> Dict:
         for stat in ATTRIBUTE_NAMES:
             print(f"  {stat.title():<14} {stats[stat]}")
         sheet = character_sheet_channels(stats, level=1)
-        print(f"\nMax HP: {sheet['max_health_base']} | Base movement: {sheet['movement']} | Initiative: +{sheet['initiative_bonus']} | Crit: {sheet['critical_chance_percent']}%")
-        confirm = input("Confirm this build? (yes/no): ").strip().lower()
+        _print_derived_sheet(sheet)
+        confirm = input("\nConfirm this build? (yes/no): ").strip().lower()
         if confirm in {"yes", "y"} and validation["valid"] and validation["points_unspent"] == 0:
             break
         print("Rebuilding your attributes.\n")
 
     print("\nGenerating your class, backstory, abilities, and starting gear...")
     package = generate_character_package(game_master.provider, name=name, appearance=appearance, stats=stats)
+    resource_name = str(package.get("resource_name") or "Resource").strip() or "Resource"
     print(f"\nCLASS: {package['class_name']}")
-    print(f"RESOURCE: {package['resource_name']}")
-    print(f"BACKSTORY: {package['backstory']}\n")
+    print(f"RESOURCE: {resource_name}")
+    print(f"BACKSTORY: {package['backstory']}")
+    _print_derived_sheet(sheet, resource_name)
 
     abilities = package["abilities"]
-    print("BEGINNER ABILITIES — choose 2")
+    print(f"\nBEGINNER ABILITIES — choose 2 (Max {resource_name}: {int(sheet['max_resource_base'])})")
     for i, ability in enumerate(abilities, 1):
-        print(f"{i}. {ability.get('name')} — {ability.get('description')} (Cost {ability.get('resource_cost', 0)})")
+        print(f"{i}. {ability.get('name')} — {ability.get('description')} (Cost {ability.get('resource_cost', 0)} {resource_name})")
     chosen_abilities = _choose_many(abilities, 2, "Choose 2 ability numbers (example 1,4): ")
 
     kits = package["starter_kits"]
@@ -201,7 +261,6 @@ def run_character_creation(game_master) -> Dict:
     chosen_equipment = _choose_many(equipment, 2, "Choose 2 equipment numbers: ")
 
     sheet = character_sheet_channels(stats, level=1)
-    resource_name = str(package.get("resource_name") or "Resource").strip() or "Resource"
     player = game_master.state.data.setdefault("player", {})
     player.update({
         "name": name,
@@ -218,6 +277,7 @@ def run_character_creation(game_master) -> Dict:
         "resource_type": resource_key(resource_name),
         "resource": sheet["max_resource_base"],
         "max_resource": sheet["max_resource_base"],
+        "resource_regeneration_per_round": sheet["resource_regeneration_per_round"],
         "mana": sheet["max_resource_base"],
         "max_mana": sheet["max_resource_base"],
         "initiative_bonus": sheet["initiative_bonus"],
@@ -225,6 +285,7 @@ def run_character_creation(game_master) -> Dict:
         "critical_chance_percent": sheet["critical_chance_percent"],
         "physical_resistance_percent": sheet["physical_resistance_percent"],
         "status_resistance_percent": sheet["status_resistance_percent"],
+        "defend_action_ac_bonus": sheet["defend_action_ac_bonus"],
         "unlocked_abilities": deepcopy(chosen_abilities),
         "equipped_abilities": deepcopy(chosen_abilities),
         "starter_kit": deepcopy(chosen_kit),
@@ -238,6 +299,13 @@ def run_character_creation(game_master) -> Dict:
     game_master.state.data["encounter_reset_pending"] = False
     game_master.state.data["campaign_status"] = "active"
     game_master.state.save()
+
+    print("\nFINAL CHARACTER SUMMARY")
+    print(f"  {name} — {player['class']}")
+    _print_derived_sheet(sheet, resource_name)
+    print("  Chosen Abilities:        " + ", ".join(str(a.get("name")) for a in chosen_abilities))
+    print("  Starter Kit:             " + str(chosen_kit.get("name")))
+    print("  Special Equipment:       " + ", ".join(str(i.get("name")) for i in chosen_equipment))
 
     opening_context = {
         "player_action": "Begin the adventure with an opening scene for this newly completed character.",
