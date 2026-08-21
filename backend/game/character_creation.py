@@ -71,27 +71,25 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
 
 
 def _normalize_starter_ability_costs(abilities: List[Dict], max_resource: int) -> List[Dict]:
-    """Normalize starter ability costs to the real resource-point scale.
+    """Normalize starter ability costs without protecting low-Resource builds.
 
-    Starter abilities are intentionally low-tier and should normally be usable by
-    the new character. The wider game may still contain abilities whose resource
-    costs exceed the player's current or maximum resource; those may be unlocked
-    and equipped but cannot be activated until the requirement can actually be paid.
+    Starter abilities are low-tier, but their costs are properties of the ability,
+    not of the character's current Resource stat. A character with 0 maximum
+    resource still receives normal 5/10/15-cost abilities; those abilities can be
+    equipped but cannot be activated until the character raises Resource enough.
     """
     normalized: List[Dict] = []
     for raw in abilities:
         ability = deepcopy(raw) if isinstance(raw, dict) else {}
         raw_cost = max(0, int(ability.get("resource_cost", 0) or 0))
-        if max_resource <= 0:
-            cost = 0
-        else:
-            if 1 <= raw_cost <= 3:
-                raw_cost *= 5
-            if raw_cost <= 0:
-                raw_cost = 5
-            cost = max(5, int(round(raw_cost / 5.0)) * 5)
-            # Character-creation abilities are beginner-tier, so keep them usable.
-            cost = min(cost, max_resource)
+        if 1 <= raw_cost <= 3:
+            raw_cost *= 5
+        if raw_cost <= 0:
+            raw_cost = 5
+        # Beginner abilities stay on a weak 5/10/15 cost band, regardless of
+        # whether the current character can afford them yet.
+        cost = max(5, int(round(raw_cost / 5.0)) * 5)
+        cost = min(cost, 15)
         ability["resource_cost"] = cost
         normalized.append(ability)
     return normalized
@@ -129,6 +127,14 @@ def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
     return " | ".join(parts) if parts else "No numeric combat effect"
 
 
+def _availability_text(entry: Dict, max_resource: int, resource_name: str) -> str:
+    """Explain when a chosen ability cannot yet be paid for."""
+    cost = max(0, int(entry.get("resource_cost", 0) or 0))
+    if cost > max_resource:
+        return f" | UNUSABLE NOW: needs at least {cost} max {resource_name}"
+    return ""
+
+
 def generate_character_package(provider, *, name: str, appearance: str, stats: Dict[str, int]) -> Dict:
     """Ask the live model for a strictly structured character package."""
     client = getattr(provider, "client", None)
@@ -148,7 +154,7 @@ Generate a unique beginner-friendly class, a thematic class-resource name, and a
 
 Generate exactly 6 BEGINNER abilities. Starter abilities must be intentionally weaker than mid/late-game abilities. Stronger abilities later in progression should have stronger effects and usually higher resource costs.
 Every ability must state exact mechanics, not vague prose. Include name, description, resource_cost, target, range, and the exact effect fields that apply. Offensive abilities need damage such as 1d4, 1d6, or another explicit expression. Movement abilities need movement_squares. Healing abilities need healing. Shield abilities need shield. Buff/debuff/utility abilities need an explicit effect string with exact values/duration when relevant.
-RESOURCE COSTS ARE REAL RESOURCE POINTS. Costs use multiples of 5. Beginner abilities normally cost 5, 10, or 15 resource and should be affordable by this starting character. Do not output 1/2/3 slot-style costs.
+RESOURCE COSTS ARE REAL RESOURCE POINTS. Beginner costs must be 5, 10, or 15 resource points. DO NOT lower or remove an ability's cost because this character has low or zero maximum resource. A character with 0 max resource should still receive normal 5/10/15-cost starter abilities and simply be unable to activate them until Resource is increased. Do not output 0-cost active abilities and do not output 1/2/3 slot-style costs.
 attack_attribute may be strength, dexterity, or magic when an attack roll is appropriate.
 
 Generate exactly 3 starter kits, each with a name and 3-4 structured item objects. Starter weapons must be deliberately weak early-game weapons. Every weapon item MUST contain type='weapon', description, damage, resource_cost, range, and attack_attribute. Weapon attacks may cost 0 or a small amount of class resource at the beginning. Stronger weapons acquired later should generally deal more damage or have stronger effects and may cost more resource per attack.
@@ -293,15 +299,19 @@ def run_character_creation(game_master) -> Dict:
     print("\nGenerating your class, backstory, abilities, and starting gear...")
     package = generate_character_package(game_master.provider, name=name, appearance=appearance, stats=stats)
     resource_name = str(package.get("resource_name") or "Resource").strip() or "Resource"
+    max_resource = int(sheet["max_resource_base"])
     print(f"\nCLASS: {package['class_name']}")
     print(f"RESOURCE: {resource_name}")
     print(f"BACKSTORY: {package['backstory']}")
     _print_derived_sheet(sheet, resource_name)
 
     abilities = package["abilities"]
-    print(f"\nBEGINNER ABILITIES — choose 2 (Max {resource_name}: {int(sheet['max_resource_base'])})")
+    print(f"\nBEGINNER ABILITIES — choose 2 (Max {resource_name}: {max_resource})")
+    if max_resource <= 0:
+        print(f"NOTE: You currently have 0 {resource_name}. You may still choose and equip abilities, but you cannot use them until you raise Resource enough to pay their cost.")
     for i, ability in enumerate(abilities, 1):
-        print(f"{i}. {ability.get('name')} — {ability.get('description')} [{_effect_text(ability, resource_name)}]")
+        availability = _availability_text(ability, max_resource, resource_name)
+        print(f"{i}. {ability.get('name')} — {ability.get('description')} [{_effect_text(ability, resource_name)}{availability}]")
     chosen_abilities = _choose_many(abilities, 2, "Choose 2 ability numbers (example 1,4): ")
 
     kits = package["starter_kits"]
@@ -368,7 +378,8 @@ def run_character_creation(game_master) -> Dict:
     _print_derived_sheet(sheet, resource_name)
     print("  Chosen Abilities:")
     for ability in chosen_abilities:
-        print(f"    - {ability.get('name')}: {_effect_text(ability, resource_name)}")
+        availability = _availability_text(ability, max_resource, resource_name)
+        print(f"    - {ability.get('name')}: {_effect_text(ability, resource_name)}{availability}")
     print("  Starter Kit:             " + str(chosen_kit.get("name")))
     if starter_weapon:
         print("  Starting Weapon:         " + _print_item(starter_weapon, resource_name))
