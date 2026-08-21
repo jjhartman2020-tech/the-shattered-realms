@@ -1,6 +1,6 @@
 """Authoritative combat engine for The Shattered Realms.
 
-Combat follows the documented combat framework and canonical 0-30 attributes.
+Combat follows the documented combat framework and canonical 0-100 attributes.
 The rules engine owns mechanical values; AI narration must not invent results.
 """
 
@@ -34,6 +34,23 @@ def grid_distance(a: Dict, b: Dict) -> int:
     return abs(pa["x"] - pb["x"]) + abs(pa["y"] - pb["y"])
 
 
+def _sync_resource_aliases(actor: Dict) -> None:
+    actor["mana"] = int(actor.get("resource", 0) or 0)
+    actor["max_mana"] = int(actor.get("max_resource", 0) or 0)
+
+
+def _regenerate_resource_for_turn(actor: Dict) -> int:
+    """Regenerate the actor's documented per-round class resource at turn start."""
+    current = int(actor.get("resource", actor.get("mana", 0)) or 0)
+    maximum = int(actor.get("max_resource", actor.get("max_mana", 0)) or 0)
+    regen = int(actor.get("resource_regeneration_per_round", 0) or 0)
+    new_value = min(maximum, current + max(0, regen))
+    actor["resource"] = new_value
+    actor["max_resource"] = maximum
+    _sync_resource_aliases(actor)
+    return new_value - current
+
+
 def start_combat(combatants: List[Dict]) -> Dict:
     if not combatants:
         raise ValueError("Combat requires at least one combatant")
@@ -52,8 +69,10 @@ def start_combat(combatants: List[Dict]) -> Dict:
         actor.setdefault("max_hp", channels["max_health_base"])
         if actor.get("team") == "enemy" and "hp" in raw:
             actor["max_hp"] = int(actor["hp"])
-        actor.setdefault("mana", channels["max_mana_base"])
-        actor.setdefault("max_mana", channels["max_mana_base"])
+        actor.setdefault("resource", channels["max_resource_base"])
+        actor.setdefault("max_resource", channels["max_resource_base"])
+        actor.setdefault("resource_regeneration_per_round", channels["resource_regeneration_per_round"])
+        _sync_resource_aliases(actor)
         actor.setdefault("armor_class", 10 + channels["defense_bonus"])
         actor.setdefault("attack_bonus", 0)
         actor.setdefault("damage", "1d4")
@@ -203,6 +222,9 @@ def resolve_attack(combat: Dict, attacker_name: str, target_name: str, *,
     if attack_attribute == "dexterity":
         stat_accuracy = int(channels["dexterity_attack_accuracy"])
         default_damage_bonus = 0
+    elif attack_attribute == "magic":
+        stat_accuracy = int(channels["magic_attack_accuracy"])
+        default_damage_bonus = 0
     else:
         attack_attribute = "strength"
         stat_accuracy = int(channels["strength_attack_accuracy"])
@@ -287,6 +309,15 @@ def end_turn(combat: Dict) -> Dict:
             actor["primary_action_used"] = False
             actor["defending"] = False
             actor["active_defense_ac_bonus"] = 0
+            regenerated = _regenerate_resource_for_turn(actor)
+            if regenerated > 0:
+                combat.setdefault("log", []).append({
+                    "type": "resource_regeneration",
+                    "actor": actor.get("name"),
+                    "amount": regenerated,
+                    "resource": actor.get("resource"),
+                    "max_resource": actor.get("max_resource"),
+                })
             break
         if index == starting_index:
             combat["active"] = False
@@ -300,3 +331,9 @@ def _check_combat_end(combat: Dict) -> None:
     if len(living_teams) <= 1:
         combat["active"] = False
         combat["winner"] = next(iter(living_teams), None)
+        # Stats.md: class resources refill completely after a finished battle.
+        for actor in combat.get("combatants", []):
+            maximum = int(actor.get("max_resource", actor.get("max_mana", 0)) or 0)
+            actor["resource"] = maximum
+            actor["max_resource"] = maximum
+            _sync_resource_aliases(actor)
