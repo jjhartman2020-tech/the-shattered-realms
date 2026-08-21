@@ -25,7 +25,6 @@ def _living_teams(combat: Dict) -> set:
 
 
 def _repair_combat_end_state(combat: Dict) -> None:
-    """Recompute winner after Armor HP may have prevented an apparent defeat."""
     teams = _living_teams(combat)
     if len(teams) <= 1:
         combat["active"] = False
@@ -33,6 +32,50 @@ def _repair_combat_end_state(combat: Dict) -> None:
     else:
         combat["active"] = True
         combat.pop("winner", None)
+
+
+def _sanitize_old_package_armor(package: Dict) -> Dict:
+    """The five-slot system replaces all old armor_bonus starter items."""
+    result = deepcopy(package)
+    cleaned_kits = []
+    for raw_kit in result.get("starter_kits", []):
+        kit = deepcopy(raw_kit) if isinstance(raw_kit, dict) else {}
+        items = []
+        for raw in kit.get("items", []):
+            if not isinstance(raw, dict):
+                continue
+            item = deepcopy(raw)
+            if str(item.get("type") or "").strip().lower() == "armor":
+                continue
+            item.pop("armor_bonus", None)
+            items.append(item)
+        kit["items"] = items
+        cleaned_kits.append(kit)
+    result["starter_kits"] = cleaned_kits
+    special = []
+    for raw in result.get("special_equipment", []):
+        if not isinstance(raw, dict):
+            continue
+        item = deepcopy(raw)
+        if str(item.get("type") or "").strip().lower() == "armor":
+            continue
+        item.pop("armor_bonus", None)
+        special.append(item)
+    result["special_equipment"] = special
+    return result
+
+
+def _install_character_creation_hook() -> None:
+    import backend.game.character_creation as cc
+    current = cc.generate_character_package
+    if getattr(current, "_five_slot_armor_hook", False):
+        return
+
+    def generate_without_legacy_armor(*args, **kwargs):
+        return _sanitize_old_package_armor(current(*args, **kwargs))
+
+    generate_without_legacy_armor._five_slot_armor_hook = True
+    cc.generate_character_package = generate_without_legacy_armor
 
 
 def _inject_player_armor(game_master, combat: Dict) -> None:
@@ -68,7 +111,6 @@ def _sync_player_from_combat(game_master, combat: Dict) -> None:
 
 
 def _retrofit_armor_after_damage(combat: Dict, outcome: Dict, target_name: str, *, damage_type: str | None = None) -> Dict:
-    """Route already-calculated final damage through Armor HP before real HP."""
     if not isinstance(outcome, dict) or not outcome.get("hit"):
         return outcome
     damage = max(0, int(outcome.get("damage", 0) or 0))
@@ -77,19 +119,15 @@ def _retrofit_armor_after_damage(combat: Dict, outcome: Dict, target_name: str, 
     target = next((a for a in combat.get("combatants", []) if isinstance(a, dict) and a.get("name") == target_name), None)
     if not target or not isinstance(target.get("equipped_armor"), dict):
         return outcome
-
     sync_armor_summary(target)
     if int(target.get("max_armor", 0) or 0) <= 0:
         return outcome
 
-    # Legacy resolver already deducted damage from HP. Restore that exact final damage,
-    # then apply the SAME damage through Armor -> HP. No dice or attack rolls are rerolled.
     old_hp_after = int(target.get("hp", 0) or 0)
     max_hp = int(target.get("max_hp", old_hp_after) or old_hp_after)
     target["hp"] = min(max_hp, old_hp_after + damage)
     target["defeated"] = False
     split = apply_damage_to_armor(target, damage, damage_type=damage_type)
-
     base_move = int(target.get("base_movement_without_armor", target.get("movement", 1)) or 1)
     target["movement"] = effective_movement(base_move, target.get("equipped_armor", {}))
 
@@ -109,10 +147,10 @@ def _retrofit_armor_after_damage(combat: Dict, outcome: Dict, target_name: str, 
 
 
 def install_armor_runtime(game_master) -> None:
-    """Patch the existing GM runtime once without duplicating the combat engine."""
     if getattr(game_master, "_armor_runtime_installed", False):
         return
     game_master._armor_runtime_installed = True
+    _install_character_creation_hook()
 
     original_start = game_master._start_combat
     def start_with_armor(request):
@@ -127,7 +165,6 @@ def install_armor_runtime(game_master) -> None:
         _sync_player_from_combat(game_master, combat)
     game_master._persist_combat = persist_with_armor
 
-    # GameMaster imported these functions directly, so replace its module globals.
     import backend.ai.game_master as gm_module
     original_attack = gm_module.resolve_attack
     original_ability = gm_module.resolve_ability
@@ -153,17 +190,11 @@ def install_armor_runtime(game_master) -> None:
 
 
 def finish_character_creation_with_armor(game_master, created: Dict) -> Dict:
-    """Run the final armor step, replacing obsolete starter-kit armor."""
     player = game_master.state.data.setdefault("player", {})
     inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
-    player["inventory"] = [
-        item for item in inventory
-        if not (isinstance(item, dict) and str(item.get("type") or "").strip().lower() == "armor")
-    ]
+    player["inventory"] = [item for item in inventory if not (isinstance(item, dict) and str(item.get("type") or "").strip().lower() == "armor")]
     for item in player["inventory"]:
-        if isinstance(item, dict):
-            item.pop("armor_bonus", None)
-
+        if isinstance(item, dict): item.pop("armor_bonus", None)
     run_starting_armor_creation(game_master)
     created["player"] = deepcopy(game_master.state.data.get("player", {}))
     return created
