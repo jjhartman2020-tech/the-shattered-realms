@@ -26,41 +26,46 @@ def _dice_sides(value) -> int:
 def default_sell_value(item: Dict) -> int:
     """Give legacy/generated items a modest resale value when none was stored."""
     if not isinstance(item, dict): return 0
-    if "sell_value" in item:
-        return max(0, _safe_int(item.get("sell_value"), 0))
+    if "sell_value" in item: return max(0, _safe_int(item.get("sell_value"), 0))
     kind = _item_type(item)
     if kind in {"quest", "quest_item", "key_item"}: return 0
-    bases = {
-        "weapon": 6, "shield": 5, "armor": 3, "consumable": 3,
-        "utility": 2, "material": 1, "ingredient": 1, "flower": 1,
-        "herb": 1, "food": 1, "ammo": 1, "focus": 5,
-        "accessory": 5, "arcane_relic": 8, "relic": 8, "misc": 1,
-    }
+    bases = {"weapon": 6, "shield": 5, "armor": 3, "consumable": 3, "utility": 2, "material": 1, "ingredient": 1, "flower": 1, "herb": 1, "food": 1, "ammo": 1, "focus": 5, "accessory": 5, "arcane_relic": 8, "relic": 8, "misc": 1}
     value = bases.get(kind, 2)
     if kind == "weapon":
-        value += max(1, _dice_sides(item.get("damage")) // 2)
-        value += max(0, min(6, _safe_int(item.get("range"), 0)))
-    elif kind == "shield":
-        value += max(0, _safe_int(item.get("shield", item.get("max_shield_hp", 0)), 0) * 2)
+        value += max(1, _dice_sides(item.get("damage")) // 2); value += max(0, min(6, _safe_int(item.get("range"), 0)))
+    elif kind == "shield": value += max(0, _safe_int(item.get("shield", item.get("max_shield_hp", 0)), 0) * 2)
     elif kind == "armor":
         value += max(0, _safe_int(item.get("max_armor_hp", item.get("armor_hp", 0)), 0) * 2)
-        bonus = item.get("stat_bonus") if isinstance(item.get("stat_bonus"), dict) else {}
-        value += max(0, _safe_int(bonus.get("amount"), 0) * 3)
-    elif kind == "consumable" and item.get("healing"):
-        value += max(1, _dice_sides(item.get("healing")) // 2)
+        bonus = item.get("stat_bonus") if isinstance(item.get("stat_bonus"), dict) else {}; value += max(0, _safe_int(bonus.get("amount"), 0) * 3)
+    elif kind == "consumable" and item.get("healing"): value += max(1, _dice_sides(item.get("healing")) // 2)
     return max(0, value)
 
 
 def ensure_inventory_sell_values(player: Dict) -> bool:
-    changed = False
-    inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
+    changed = False; inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
     for item in inventory:
         if not isinstance(item, dict): continue
-        if "sell_value" not in item:
-            item["sell_value"] = default_sell_value(item); changed = True
-        if "quantity" not in item:
-            item["quantity"] = 1; changed = True
+        if "sell_value" not in item: item["sell_value"] = default_sell_value(item); changed = True
+        if "quantity" not in item: item["quantity"] = 1; changed = True
     return changed
+
+
+def _currency_label(game_master, amount: int) -> str:
+    """Render money in the currency native to the confirmed campaign world."""
+    world = game_master.state.data.get("world_profile", {})
+    economy = str(world.get("economy") or "").strip()
+    genre = str(world.get("genre") or "").lower()
+    tech = str(world.get("technology_level") or "").lower()
+    text = f"{economy} {genre} {tech}".lower()
+    if any(word in text for word in ("credit", "credits")): unit = "credit" if amount == 1 else "credits"; return f"{amount} {unit}"
+    if any(word in text for word in ("dollar", "dollars", "usd", "$", "modern", "contemporary")): return f"${amount}"
+    if any(word in text for word in ("gold", "coin", "coins", "medieval", "fantasy")): unit = "gold"; return f"{amount} {unit}"
+    # If the world architect supplied a short named economy/currency, use it rather than forcing gold.
+    match = re.search(r"(?:currency|uses?|paid in|money)\s*(?:is|:|=)?\s*([A-Za-z][A-Za-z -]{1,24})", economy, re.IGNORECASE)
+    if match:
+        unit = match.group(1).strip().rstrip(".,;")
+        return f"{amount} {unit}"
+    return f"{amount} currency"
 
 
 def _same_item(a: Dict | None, b: Dict | None) -> bool:
@@ -73,42 +78,33 @@ def _equipped_label(player: Dict, item: Dict) -> str:
     if kind == "weapon" and _same_item(player.get("equipped_weapon"), item): return " [EQUIPPED WEAPON]"
     if kind == "shield" and _same_item(player.get("equipped_shield"), item): return " [EQUIPPED SHIELD]"
     if kind == "armor":
-        slot = str(item.get("slot") or "").strip().lower()
-        current = (player.get("equipped_armor") or {}).get(slot) if isinstance(player.get("equipped_armor"), dict) else None
+        slot = str(item.get("slot") or "").strip().lower(); current = (player.get("equipped_armor") or {}).get(slot) if isinstance(player.get("equipped_armor"), dict) else None
         if _same_item(current, item): return f" [EQUIPPED {slot.upper()}]"
     return ""
 
 
 def _item_mechanics(item: Dict) -> str:
-    parts: List[str] = []
-    kind = _item_type(item)
+    parts: List[str] = []; kind = _item_type(item)
     if kind == "weapon":
         parts.append(f"Damage {normalize_damage_expression(item.get('damage', '1d4'), '1d4')}")
         if item.get("range") is not None: parts.append(f"Range {item.get('range')}")
         if item.get("attack_attribute"): parts.append(str(item.get("attack_attribute")).title())
-    elif kind == "shield":
-        parts.append(f"Shield HP {max(0, _safe_int(item.get('shield', item.get('max_shield_hp', 0)), 0))}")
+    elif kind == "shield": parts.append(f"Shield HP {max(0, _safe_int(item.get('shield', item.get('max_shield_hp', 0)), 0))}")
     elif kind == "armor":
-        parts.append(f"Armor {_safe_int(item.get('armor_hp'),0)}/{_safe_int(item.get('max_armor_hp', item.get('armor_hp',0)),0)}")
-        parts.append(f"Slot {str(item.get('slot') or 'unknown').title()}")
-        parts.append(f"Weight {_safe_int(item.get('weight'),0)}")
+        parts.append(f"Armor {_safe_int(item.get('armor_hp'),0)}/{_safe_int(item.get('max_armor_hp', item.get('armor_hp',0)),0)}"); parts.append(f"Slot {str(item.get('slot') or 'unknown').title()}"); parts.append(f"Weight {_safe_int(item.get('weight'),0)}")
         bonus = item.get("stat_bonus") if isinstance(item.get("stat_bonus"), dict) else None
         if bonus: parts.append(f"+{_safe_int(bonus.get('amount'),0)} {str(bonus.get('stat') or '').title()}")
-    elif item.get("healing"):
-        parts.append(f"Healing {normalize_damage_expression(item.get('healing'), '1d4')}")
+    elif item.get("healing"): parts.append(f"Healing {normalize_damage_expression(item.get('healing'), '1d4')}")
     if item.get("effect"): parts.append(str(item.get("effect")))
     return " | ".join(parts) if parts else "Utility / story item"
 
 
 def show_equipment(player: Dict) -> None:
-    print("\nEQUIPPED GEAR")
-    weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else None
-    shield = player.get("equipped_shield") if isinstance(player.get("equipped_shield"), dict) else None
+    print("\nEQUIPPED GEAR"); weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else None; shield = player.get("equipped_shield") if isinstance(player.get("equipped_shield"), dict) else None
     print("  Weapon: " + ((weapon.get("name") + " — " + _item_mechanics(weapon)) if weapon else "None"))
     if shield: print(f"  Shield: {shield.get('name')} — {_safe_int(player.get('shield_hp'),0)}/{_safe_int(player.get('max_shield_hp'),0)} Shield HP")
     else: print("  Shield: None")
-    armor = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}
-    print("  Armor:")
+    armor = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}; print("  Armor:")
     for slot in ARMOR_SLOTS:
         piece = armor.get(slot)
         if isinstance(piece, dict): print(f"    {slot.title():<12} {piece.get('name')} — {_item_mechanics(piece)}")
@@ -119,44 +115,31 @@ def show_inventory(game_master) -> None:
     player = game_master.state.data.get("player", {})
     if ensure_inventory_sell_values(player): game_master.state.save()
     inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
-    print("\n" + "=" * 52); print("INVENTORY"); print("=" * 52)
-    show_equipment(player)
-    if not inventory:
-        print("\nYour inventory is empty."); return
+    print("\n" + "=" * 52); print("INVENTORY"); print("=" * 52); show_equipment(player)
+    if not inventory: print("\nYour inventory is empty."); return
     print("\nITEMS")
     for index, item in enumerate(inventory, 1):
-        if not isinstance(item, dict):
-            print(f"  {index}. {item}"); continue
-        desc = str(item.get("description") or "").strip(); desc_text = f" — {desc}" if desc else ""
-        quantity = max(1, _safe_int(item.get("quantity"), 1)); quantity_text = f" x{quantity}" if quantity > 1 else ""
-        sell_value = default_sell_value(item); sell_text = "Unsellable" if sell_value <= 0 else f"Sell Value {sell_value}" + (" each" if quantity > 1 else "")
-        print(f"  {index}. {item.get('name','Item')}{quantity_text} ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}")
-        print(f"     {_item_mechanics(item)} | {sell_text}")
+        if not isinstance(item, dict): print(f"  {index}. {item}"); continue
+        desc = str(item.get("description") or "").strip(); desc_text = f" — {desc}" if desc else ""; quantity = max(1, _safe_int(item.get("quantity"), 1)); quantity_text = f" x{quantity}" if quantity > 1 else ""; sell_value = default_sell_value(item)
+        sell_text = "Unsellable" if sell_value <= 0 else f"Sell Value {_currency_label(game_master, sell_value)}" + (" each" if quantity > 1 else "")
+        print(f"  {index}. {item.get('name','Item')}{quantity_text} ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}"); print(f"     {_item_mechanics(item)} | {sell_text}")
     print("\nType 'equip' to change your equipped weapon, shield, or armor piece.")
 
 
 def _combat_active(game_master) -> bool:
-    combat = game_master.state.data.get("combat")
-    return isinstance(combat, dict) and bool(combat.get("active"))
+    combat = game_master.state.data.get("combat"); return isinstance(combat, dict) and bool(combat.get("active"))
 
 
 def _equip_weapon(player: Dict, item: Dict) -> str:
-    player["equipped_weapon"] = deepcopy(item); player["damage"] = normalize_damage_expression(item.get("damage", "1d4"), "1d4")
-    return f"Equipped weapon: {item.get('name')} ({player['damage']})."
+    player["equipped_weapon"] = deepcopy(item); player["damage"] = normalize_damage_expression(item.get("damage", "1d4"), "1d4"); return f"Equipped weapon: {item.get('name')} ({player['damage']})."
 
 
 def _equip_shield(player: Dict, item: Dict) -> str:
-    shield_hp = max(1, _safe_int(item.get("shield", item.get("max_shield_hp", 1)), 1)); item = deepcopy(item); item["shield"] = shield_hp
-    player["equipped_shield"] = item; player["max_shield_hp"] = shield_hp; player["shield_hp"] = shield_hp
-    return f"Equipped shield: {item.get('name')} ({shield_hp} Shield HP)."
+    shield_hp = max(1, _safe_int(item.get("shield", item.get("max_shield_hp", 1)), 1)); item = deepcopy(item); item["shield"] = shield_hp; player["equipped_shield"] = item; player["max_shield_hp"] = shield_hp; player["shield_hp"] = shield_hp; return f"Equipped shield: {item.get('name')} ({shield_hp} Shield HP)."
 
 
 def _equip_armor(player: Dict, item: Dict) -> str:
-    piece = normalize_armor_piece(item); slot = piece["slot"]
-    equipped = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}; equipped = deepcopy(equipped); equipped[slot] = piece
-    player["equipped_armor"] = equipped; player["armor_set_name"] = "Mixed Set"; sync_armor_summary(player)
-    base_move = _safe_int(player.get("base_movement_without_armor", player.get("movement", 1)), 1); player["base_movement_without_armor"] = base_move; player["movement"] = effective_movement(base_move, equipped)
-    return f"Equipped {piece.get('name')} in the {slot.title()} slot. Armor is now {player.get('armor',0)}/{player.get('max_armor',0)}."
+    piece = normalize_armor_piece(item); slot = piece["slot"]; equipped = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}; equipped = deepcopy(equipped); equipped[slot] = piece; player["equipped_armor"] = equipped; player["armor_set_name"] = "Mixed Set"; sync_armor_summary(player); base_move = _safe_int(player.get("base_movement_without_armor", player.get("movement", 1)), 1); player["base_movement_without_armor"] = base_move; player["movement"] = effective_movement(base_move, equipped); return f"Equipped {piece.get('name')} in the {slot.title()} slot. Armor is now {player.get('armor',0)}/{player.get('max_armor',0)}."
 
 
 def equip_inventory_item(game_master, index: int) -> str:
@@ -181,6 +164,5 @@ def run_equipment_screen(game_master) -> None:
         raw = input("\nEnter the inventory number to equip, or 'back': ").strip().lower()
         if raw in {"back", "b", "exit", "cancel"}: return
         try: index = int(raw)
-        except ValueError:
-            print("Enter an inventory number or 'back'."); continue
+        except ValueError: print("Enter an inventory number or 'back'."); continue
         print(equip_inventory_item(game_master, index)); show_equipment(game_master.state.data.get("player", {})); return
