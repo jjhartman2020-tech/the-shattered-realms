@@ -114,11 +114,11 @@ class GameState:
 
         earned_sp = earned_skill_points(level)
         spent_sp = sum(stats.values())
-        stored_sp = player.get("skill_points_unspent")
-        if stored_sp is None:
-            stored_sp = player.get("attribute_points_unspent")
-        # For old saves, calculate from level/build. For new saves, never erase saved unspent SP.
-        player["skill_points_unspent"] = max(int(stored_sp or 0), max(0, earned_sp - spent_sp))
+        # The legacy field is present in all pre-SP saves, so prefer it when migrating.
+        # New saves keep both fields synchronized, making this safe in both directions.
+        stored_sp = player.get("attribute_points_unspent", player.get("skill_points_unspent", 0))
+        calculated_sp = max(0, earned_sp - spent_sp)
+        player["skill_points_unspent"] = max(0, int(stored_sp or 0), calculated_sp)
         player["attribute_points_unspent"] = player["skill_points_unspent"]
         player["ability_points"] = max(0, int(player.get("ability_points", 0) or 0))
         player["xp_orbs"] = max(0, int(player.get("xp_orbs", 0) or 0))
@@ -128,16 +128,13 @@ class GameState:
         skills = player.get("skills") if isinstance(player.get("skills"), dict) else {}
         migrated = deepcopy(DEFAULT_SKILLS)
         for name in migrated:
-            if name in skills:
-                migrated[name] = int(skills.get(name, 0) or 0)
+            if name in skills: migrated[name] = int(skills.get(name, 0) or 0)
         player["skills"] = migrated
 
         if not completed:
             for key in ("unlocked_abilities", "equipped_abilities"):
                 items = player.get(key)
-                if not isinstance(items, list):
-                    items = []
-                    player[key] = items
+                if not isinstance(items, list): items = []; player[key] = items
                 if not any(isinstance(i, dict) and str(i.get("name", "")).lower() == "power strike" for i in items):
                     items.append(deepcopy(PROTOTYPE_POWER_STRIKE))
 
@@ -207,12 +204,10 @@ class GameState:
             if not isinstance(change, dict): continue
             kind = str(change.get("type") or "").strip().lower()
             if kind == "award_xp_orbs":
-                self.award_xp_orbs(int(change.get("amount", 0) or 0))
-                continue
+                self.award_xp_orbs(int(change.get("amount", 0) or 0)); continue
             if kind == "set_encounter_enemies":
                 enemies = change.get("enemies")
-                if isinstance(enemies, list):
-                    self.data["pending_encounter_enemies"] = [deepcopy(e) for e in enemies if isinstance(e, dict)]
+                if isinstance(enemies, list): self.data["pending_encounter_enemies"] = [deepcopy(e) for e in enemies if isinstance(e, dict)]
                 continue
             if kind == "reset_combat_state":
                 current = self.data.get("combat")
@@ -220,15 +215,12 @@ class GameState:
                     template = self.data.get("encounter_template")
                     if not isinstance(template, dict) or not template.get("combatants"):
                         self.data["encounter_template"] = self._template_from_combat(current)
-                self.data["encounter_reset_pending"] = True
-                self.data["combat"] = {"active": False}
+                self.data["encounter_reset_pending"] = True; self.data["combat"] = {"active": False}
                 player = self.data.setdefault("player", {})
                 player["combat_position"] = {"x": 0, "y": 0}
                 player["hp"] = int(player.get("max_hp", player.get("hp", 0)) or 0)
-                player["resource"] = int(player.get("max_resource", 0) or 0)
-                player["mana"] = player["resource"]
-                player["temporary_hp"] = 0
-                player["conditions"] = []
+                player["resource"] = int(player.get("max_resource", 0) or 0); player["mana"] = player["resource"]
+                player["temporary_hp"] = 0; player["conditions"] = []
                 continue
             if kind == "restore_hp":
                 player = self.data.setdefault("player", {})
@@ -237,11 +229,9 @@ class GameState:
             if kind in {"restore_mana", "restore_resource"}:
                 player = self.data.setdefault("player", {})
                 requested = change.get("resource", change.get("mana", player.get("max_resource", 0)))
-                value = max(0, int(requested or 0))
-                player["resource"] = value; player["mana"] = value; continue
+                value = max(0, int(requested or 0)); player["resource"] = value; player["mana"] = value; continue
             path = change.get("path")
-            if isinstance(path, str) and path.strip() and "value" in change:
-                self.set_path(path, change["value"], save=False)
+            if isinstance(path, str) and path.strip() and "value" in change: self.set_path(path, change["value"], save=False)
         self.data["turn"] = int(self.data.get("turn", 0)) + 1
         self.save()
 
