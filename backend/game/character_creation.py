@@ -61,7 +61,7 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
             {"name": "Balanced Knife", "type": "weapon", "description": "A quick but weak backup blade.", "damage": "1d4", "range": 1, "attack_attribute": "dexterity"},
             {"name": "Hunter's Sling", "type": "weapon", "description": "A simple ranged backup weapon.", "damage": "1d4", "range": 4, "attack_attribute": "dexterity"},
             {"name": "Faded Runestone", "type": "focus", "description": "A minor magical focus.", "effect": "+1 to one Magic-based check when specifically invoked by a valid effect."},
-            {"name": "Reinforced Buckler", "type": "shield", "description": "A compact defensive tool.", "armor_bonus": 1},
+            {"name": "Reinforced Buckler", "type": "shield", "description": "A compact defensive tool.", "shield": 4},
             {"name": "Traveler's Charm", "type": "accessory", "description": "A small class-themed keepsake.", "effect": "Story utility only."},
             {"name": "Utility Satchel", "type": "utility", "description": "Tools for exploration and improvisation.", "effect": "Contains basic rope, chalk, flint, and simple hand tools."},
         ],
@@ -96,8 +96,19 @@ def _normalize_items(items: List[Dict]) -> List[Dict]:
             item["damage"] = normalize_damage_expression(item.get("damage"), "1d4")
         if item.get("healing") not in {None, "", "0", 0}:
             item["healing"] = normalize_damage_expression(item.get("healing"), "1d4")
-        if str(item.get("type") or "").strip().lower() == "weapon":
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type == "weapon":
             item.pop("resource_cost", None)
+        if item_type == "shield":
+            # Starter equipment shields are real defensive gear, not flavor text.
+            # Keep them beginner-balanced even if generation returns nonsense.
+            try:
+                shield_hp = int(item.get("shield", 4) or 4)
+            except (TypeError, ValueError):
+                shield_hp = 4
+            item["shield"] = max(3, min(5, shield_hp))
+            item.pop("resource_cost", None)
+            item.pop("armor_bonus", None)
         normalized.append(item)
     return normalized
 
@@ -118,7 +129,7 @@ def _effect_text(entry: Dict, resource_name: str | None = None) -> str:
     parts: List[str] = []
     if entry.get("damage") not in {None, "", "0", 0}: parts.append(f"Damage {normalize_damage_expression(entry['damage'], '1d4')}")
     if entry.get("healing") not in {None, "", "0", 0}: parts.append(f"Healing {normalize_damage_expression(entry['healing'], '1d4')}")
-    if entry.get("shield") not in {None, "", "0", 0}: parts.append(f"Shield {entry['shield']}")
+    if entry.get("shield") not in {None, "", "0", 0}: parts.append(f"Shield HP {entry['shield']}")
     if entry.get("movement_squares") not in {None, "", "0", 0}: parts.append(f"Move {entry['movement_squares']} squares")
     if entry.get("armor_bonus") not in {None, "", "0", 0}: parts.append(f"Armor +{entry['armor_bonus']}")
     if entry.get("range") is not None and entry.get("type") in {"weapon", "active", None}: parts.append(f"Range {entry['range']}")
@@ -148,7 +159,7 @@ Generate exactly 6 BEGINNER abilities. Every starter ability has tier='beginner'
 Every ability must have exact mechanics: name, description, resource_cost, target, range and exact applicable fields such as damage, healing, movement_squares, shield, duration, target_count, or effect. Damage and healing MUST use dice notation such as 1d4, 1d6, 1d8, or 2d6, never fixed totals such as 4 or 6. Resource costs are real points in multiples of 5. Do NOT reduce costs to 0 just because the character has 0 or low maximum Resource. A player may choose an ability they cannot currently afford; it remains unusable until Resource is raised.
 Starter abilities must be weak compared with later Novice/Expert/Master/Legendary abilities.
 Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, dice-based damage, range, and attack_attribute. Weapon damage MUST be a dice expression, never a fixed total. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
-Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have dice-based damage and no resource_cost. Do not grant permanent stat increases.
+Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have dice-based damage and no resource_cost. Any item with type='shield' MUST include integer shield between 3 and 5. This is its Beginner Shield HP. Shields do not use class Resource and must not have resource_cost or armor_bonus. Shield HP is a separate defensive pool, not AC and not Armor HP. Do not grant permanent stat increases.
 Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
     payload = {"name": name, "appearance": appearance, "confirmed_stats": stats,
                "derived": {"max_hp": sheet["max_health_base"], "max_resource": max_resource,
@@ -277,6 +288,8 @@ def run_character_creation(game_master) -> Dict:
     kit_items = deepcopy(chosen_kit.get("items", []))
     all_items = kit_items + deepcopy(chosen_equipment)
     starter_weapon = next((item for item in all_items if isinstance(item, dict) and item.get("type") == "weapon"), None)
+    starter_shield = next((item for item in all_items if isinstance(item, dict) and str(item.get("type") or "").lower() == "shield"), None)
+    starter_shield_hp = int(starter_shield.get("shield", 0) or 0) if starter_shield else 0
     player = game_master.state.data.setdefault("player", {})
     player.update({
         "name": name, "appearance": appearance, "level": 1, "xp_orbs": 0,
@@ -295,6 +308,7 @@ def run_character_creation(game_master) -> Dict:
         "unlocked_abilities": deepcopy(chosen_abilities), "equipped_abilities": deepcopy(chosen_abilities),
         "starter_kit": deepcopy(chosen_kit), "inventory": all_items,
         "special_starting_equipment": deepcopy(chosen_equipment), "equipped_weapon": deepcopy(starter_weapon),
+        "equipped_shield": deepcopy(starter_shield), "shield_hp": starter_shield_hp, "max_shield_hp": starter_shield_hp,
         "damage": normalize_damage_expression(starter_weapon.get("damage", "1d4"), "1d4") if starter_weapon else "1d4",
         "character_creation_complete": True,
     })
@@ -310,6 +324,7 @@ def run_character_creation(game_master) -> Dict:
     for ability in chosen_abilities: print(f"    - {ability.get('name')}: {_effect_text(ability, resource_name)}")
     print("  Starter Kit:             " + str(chosen_kit.get("name")))
     if starter_weapon: print("  Starting Weapon:         " + _print_item(starter_weapon, resource_name))
+    if starter_shield: print("  Starting Shield:         " + _print_item(starter_shield, resource_name))
 
     opening = game_master.provider.respond({"player_action": "Begin the adventure with an opening scene for this newly completed character.",
                                             "game_state": game_master.state.snapshot(), "relevant_memories": [], "relevant_rules": []})
