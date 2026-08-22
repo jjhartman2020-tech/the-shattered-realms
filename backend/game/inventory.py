@@ -59,8 +59,7 @@ def _currency_label(game_master, amount: int) -> str:
     text = f"{economy} {genre} {tech}".lower()
     if any(word in text for word in ("credit", "credits")): unit = "credit" if amount == 1 else "credits"; return f"{amount} {unit}"
     if any(word in text for word in ("dollar", "dollars", "usd", "$", "modern", "contemporary")): return f"${amount}"
-    if any(word in text for word in ("gold", "coin", "coins", "medieval", "fantasy")): unit = "gold"; return f"{amount} {unit}"
-    # If the world architect supplied a short named economy/currency, use it rather than forcing gold.
+    if any(word in text for word in ("gold", "coin", "coins", "medieval", "fantasy")): return f"{amount} gold"
     match = re.search(r"(?:currency|uses?|paid in|money)\s*(?:is|:|=)?\s*([A-Za-z][A-Za-z -]{1,24})", economy, re.IGNORECASE)
     if match:
         unit = match.group(1).strip().rstrip(".,;")
@@ -99,6 +98,54 @@ def _item_mechanics(item: Dict) -> str:
     return " | ".join(parts) if parts else "Utility / story item"
 
 
+CATEGORY_ORDER = {
+    "WEAPONS": 0,
+    "SHIELDS": 1,
+    "ARMOR": 2,
+    "POTIONS & HEALING": 3,
+    "CONSUMABLES": 4,
+    "AMMO": 5,
+    "MATERIALS & INGREDIENTS": 6,
+    "TOOLS & UTILITY": 7,
+    "RELICS & ACCESSORIES": 8,
+    "QUEST & KEY ITEMS": 9,
+    "OTHER": 10,
+}
+
+
+def _inventory_category(item: Dict) -> str:
+    """Put generated items into stable player-facing inventory sections."""
+    kind = _item_type(item)
+    name = str(item.get("name") or "").lower()
+    description = str(item.get("description") or "").lower()
+    combined = f"{name} {description}"
+    if kind == "weapon": return "WEAPONS"
+    if kind == "shield": return "SHIELDS"
+    if kind == "armor": return "ARMOR"
+    if kind in {"quest", "quest_item", "key_item"}: return "QUEST & KEY ITEMS"
+    if kind == "ammo": return "AMMO"
+    if kind in {"material", "ingredient", "flower", "herb", "resource"}: return "MATERIALS & INGREDIENTS"
+    if kind in {"relic", "arcane_relic", "accessory", "focus", "headwear"}: return "RELICS & ACCESSORIES"
+    if kind == "consumable":
+        healing_words = ("potion", "elixir", "tonic", "draught", "medicine", "medkit", "bandage", "stim", "healing", "heal", "restore health", "restore hp")
+        if item.get("healing") or any(word in combined for word in healing_words): return "POTIONS & HEALING"
+        return "CONSUMABLES"
+    if kind == "food": return "CONSUMABLES"
+    if kind in {"utility", "tool"}: return "TOOLS & UTILITY"
+    return "OTHER"
+
+
+def _organize_inventory(player: Dict) -> bool:
+    """Sort the stored list itself so displayed item numbers always match equip numbers."""
+    inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
+    before = [id(item) for item in inventory]
+    inventory.sort(key=lambda item: (
+        CATEGORY_ORDER.get(_inventory_category(item), 99) if isinstance(item, dict) else 99,
+        str(item.get("name") or "").lower() if isinstance(item, dict) else str(item).lower(),
+    ))
+    return before != [id(item) for item in inventory]
+
+
 def show_equipment(player: Dict) -> None:
     print("\nEQUIPPED GEAR"); weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else None; shield = player.get("equipped_shield") if isinstance(player.get("equipped_shield"), dict) else None
     print("  Weapon: " + ((weapon.get("name") + " — " + _item_mechanics(weapon)) if weapon else "None"))
@@ -113,16 +160,30 @@ def show_equipment(player: Dict) -> None:
 
 def show_inventory(game_master) -> None:
     player = game_master.state.data.get("player", {})
-    if ensure_inventory_sell_values(player): game_master.state.save()
+    changed = ensure_inventory_sell_values(player)
+    changed = _organize_inventory(player) or changed
+    if changed: game_master.state.save()
     inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
     print("\n" + "=" * 52); print("INVENTORY"); print("=" * 52); show_equipment(player)
     if not inventory: print("\nYour inventory is empty."); return
-    print("\nITEMS")
+
+    current_category = None
     for index, item in enumerate(inventory, 1):
-        if not isinstance(item, dict): print(f"  {index}. {item}"); continue
+        if not isinstance(item, dict):
+            category = "OTHER"
+            if category != current_category:
+                print(f"\n{category}"); print("-" * len(category)); current_category = category
+            print(f"  {index}. {item}")
+            continue
+        category = _inventory_category(item)
+        if category != current_category:
+            print(f"\n{category}")
+            print("-" * len(category))
+            current_category = category
         desc = str(item.get("description") or "").strip(); desc_text = f" — {desc}" if desc else ""; quantity = max(1, _safe_int(item.get("quantity"), 1)); quantity_text = f" x{quantity}" if quantity > 1 else ""; sell_value = default_sell_value(item)
         sell_text = "Unsellable" if sell_value <= 0 else f"Sell Value {_currency_label(game_master, sell_value)}" + (" each" if quantity > 1 else "")
-        print(f"  {index}. {item.get('name','Item')}{quantity_text} ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}"); print(f"     {_item_mechanics(item)} | {sell_text}")
+        print(f"  {index}. {item.get('name','Item')}{quantity_text} ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}")
+        print(f"     {_item_mechanics(item)} | {sell_text}")
     print("\nType 'equip' to change your equipped weapon, shield, or armor piece.")
 
 
