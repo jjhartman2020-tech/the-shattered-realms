@@ -255,7 +255,6 @@ def _print_combat_results(results, combat=None, player_state: dict | None = None
                 print(f"\n⏭️ {event.get('actor', 'Player')} ends the turn.")
             elif kind == "invalid":
                 print(f"\n⚠️ COMBAT ACTION INVALID: {event.get('reason', 'Unknown reason')}")
-    # Always show the HUD while combat is active, even on turns with no mechanical result list.
     _print_combat_hud(combat, player_state)
 
 
@@ -294,6 +293,66 @@ def _direct_end_turn(game_master: GameMaster) -> bool:
     return True
 
 
+def _print_resume_recap(game_master: GameMaster) -> None:
+    """Give a concise DM recap for an existing campaign resumed outside combat."""
+    snapshot = game_master.state.snapshot()
+    player = snapshot.get("player", {}) if isinstance(snapshot.get("player"), dict) else {}
+    if not player.get("character_creation_complete"):
+        return
+
+    context = game_master.context_builder.build(
+        player_action=(
+            "Resume this existing campaign. Give me a QUICK recap only: where I am, what just happened, "
+            "my current mission/objective, and the immediate situation. Do not advance time, resolve an action, "
+            "invent a new event, or change any state. Use established campaign state and recent confirmed memories only."
+        ),
+        game_state=snapshot,
+        memories=game_master.memory.recent(limit=18),
+        rules=game_master.rules.retrieve("campaign recap current objective mission location continuity"),
+    )
+    context["resume_recap"] = True
+    result = game_master.provider.respond(context)
+    recap = str(result.get("narration") or "").strip() if isinstance(result, dict) else ""
+
+    print("\n" + "=" * 52)
+    print("🎬 CAMPAIGN RECAP")
+    print("=" * 52)
+    if recap:
+        print(recap)
+    else:
+        location = str(player.get("location") or "your last known location")
+        print(f"You resume your adventure at {location}.")
+
+    hp = int(player.get("hp", 0) or 0)
+    max_hp = int(player.get("max_hp", hp) or hp)
+    shield = int(player.get("shield_hp", 0) or 0)
+    max_shield = int(player.get("max_shield_hp", 0) or 0)
+    armor = int(player.get("armor", 0) or 0)
+    max_armor = int(player.get("max_armor", 0) or 0)
+    resource_name = str(player.get("resource_name") or "Resource")
+    resource = int(player.get("resource", player.get("mana", 0)) or 0)
+    max_resource = int(player.get("max_resource", player.get("max_mana", resource)) or resource)
+    level = int(player.get("level", 1) or 1)
+    xp = int(player.get("xp_orbs", 0) or 0)
+    xp_needed = int(player.get("xp_to_next_level", 0) or 0)
+    sp = int(player.get("skill_points_unspent", player.get("attribute_points_unspent", 0)) or 0)
+    ap = int(player.get("ability_points", 0) or 0)
+    location = str(player.get("location") or "Unknown")
+    weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else None
+
+    print("\n📍 CURRENT STATUS")
+    print(f"Location: {location}")
+    shield_text = f" | Shield: {shield}/{max_shield}" if max_shield > 0 else ""
+    print(f"HP: {hp}/{max_hp}{shield_text} | Armor: {armor}/{max_armor} | {resource_name}: {resource}/{max_resource}")
+    print(f"Level: {level}/100 | XP Orbs: {xp}/{xp_needed} | Stored SP: {sp} | Stored AP: {ap}")
+    if weapon:
+        print(f"Weapon: {weapon.get('name', 'Weapon')} | Damage {weapon.get('damage', '?')} | Range {weapon.get('range', '?')}")
+    abilities = [str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict) and a.get("name")]
+    if abilities:
+        print("Abilities: " + ", ".join(abilities))
+    print("=" * 52 + "\n")
+
+
 def main() -> None:
     print("=" * 48)
     print("THE SHATTERED REALMS — AI GAME MASTER")
@@ -302,10 +361,13 @@ def main() -> None:
     install_armor_runtime(game_master)
 
     saved_combat = game_master.state.data.get("combat")
+    player_state = game_master.state.data.get("player", {})
     if isinstance(saved_combat, dict) and saved_combat.get("active"):
         print("\n⚔️ RESUMING ACTIVE COMBAT")
-        _print_combat_hud(saved_combat, game_master.state.data.get("player", {}))
+        _print_combat_hud(saved_combat, player_state)
         print()
+    elif isinstance(player_state, dict) and player_state.get("character_creation_complete"):
+        _print_resume_recap(game_master)
     else:
         print("Type 'start game' to create a world, build a character, and begin a new adventure.")
         print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
