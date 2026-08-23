@@ -116,14 +116,20 @@ def _session_payload() -> Dict:
     player = state.get("player", {}) if isinstance(state.get("player"), dict) else {}
     if player.get("character_creation_complete"):
         wallet = ensure_wallet(GAME_MASTER, grant_starting_funds=True)
-        state = GAME_MASTER.state.snapshot()
+        resumed = GAME_MASTER.resume_scene()
+        state = resumed.get("state") if isinstance(resumed.get("state"), dict) else GAME_MASTER.state.snapshot()
+        narration = str(resumed.get("narration") or _resume_text(state))
+        suggested_actions = resumed.get("suggested_actions") if isinstance(resumed.get("suggested_actions"), list) else []
         money = format_money(wallet.get("amount", 0), wallet)
     else:
+        narration = _resume_text(state)
+        suggested_actions = []
         money = "0"
+    player = state.get("player", {}) if isinstance(state.get("player"), dict) else {}
     return {
         "ok": True,
-        "narration": _resume_text(state),
-        "suggested_actions": [],
+        "narration": narration,
+        "suggested_actions": suggested_actions,
         "pending_roll": deepcopy(state.get("pending_roll")) if isinstance(state.get("pending_roll"), dict) else {},
         "state": state,
         "money_text": money,
@@ -390,6 +396,12 @@ def _finalize_character_payload(payload: Dict) -> Dict:
         "relevant_memories": [],
         "relevant_rules": [],
     })
+    GAME_MASTER.state.apply_changes(opening.get("state_changes", []))
+    for memory in opening.get("memories", []):
+        GAME_MASTER._store_memory(memory, "event")
+    for note in opening.get("world_notes", []):
+        GAME_MASTER._store_memory(note, "world")
+    GAME_MASTER.remember_current_scene(opening)
     narration = str(opening.get("narration") or "Your adventure begins.")
     suggested = opening.get("suggested_actions", []) if isinstance(opening, dict) else []
     state = GAME_MASTER.state.snapshot()
