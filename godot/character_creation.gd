@@ -39,11 +39,13 @@ var busy := false
 var shell_title: Label
 var shell_subtitle: Label
 var content: VBoxContainer
+var scroll_view: ScrollContainer
 var status_label: Label
 
 var world_input: TextEdit
 var name_input: LineEdit
 var appearance_input: TextEdit
+var ai_build_input: LineEdit
 var remaining_label: Label
 var derived_label: Label
 var stat_controls: Dictionary = {}
@@ -53,18 +55,21 @@ var kit_select: OptionButton
 var kit_details: RichTextLabel
 var armor_buttons: Array = []
 var custom_armor_input: LineEdit
+var finish_button: Button
+var updating_stat_controls := false
 
 var draft_world: Dictionary = {}
 var package: Dictionary = {}
 var derived: Dictionary = {}
 var draft_name := ""
 var draft_appearance := ""
+var draft_build_request := ""
 var draft_stats: Dictionary = {}
 var selected_ability_indexes: Array = []
 var selected_equipment_indexes: Array = []
 var selected_kit_index := 0
 var armor_options: Array = []
-var selected_armor_index := 0
+var selected_armor_index := -1
 
 
 func _ready() -> void:
@@ -84,12 +89,13 @@ func begin_new_game(_state: Dictionary = {}) -> void:
 	derived = {}
 	draft_name = ""
 	draft_appearance = ""
+	draft_build_request = ""
 	draft_stats = {}
 	selected_ability_indexes = []
 	selected_equipment_indexes = []
 	selected_kit_index = 0
 	armor_options = []
-	selected_armor_index = 0
+	selected_armor_index = -1
 	visible = true
 	move_to_front()
 	_show_world_prompt()
@@ -121,6 +127,7 @@ func _build_shell() -> void:
 	panel.add_child(margin)
 
 	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_theme_constant_override("separation", 10)
 	root.mouse_filter = Control.MOUSE_FILTER_PASS
 	margin.add_child(root)
@@ -138,6 +145,8 @@ func _build_shell() -> void:
 	root.add_child(HSeparator.new())
 
 	var scroll := ScrollContainer.new()
+	scroll_view = scroll
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(scroll)
@@ -163,6 +172,12 @@ func _clear_content() -> void:
 		child.queue_free()
 	status_label.text = ""
 	status_label.add_theme_color_override("font_color", MUTED)
+	call_deferred("_scroll_to_top")
+
+
+func _scroll_to_top() -> void:
+	if scroll_view != null:
+		scroll_view.scroll_vertical = 0
 
 
 func _show_world_prompt() -> void:
@@ -238,15 +253,20 @@ func _show_identity() -> void:
 	shell_subtitle.text = "Step 2 of 4  •  Choose your identity and spend all 42 starting SP."
 
 	var identity_grid := GridContainer.new()
+	identity_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	identity_grid.columns = 2
 	identity_grid.add_theme_constant_override("h_separation", 14)
 	identity_grid.add_theme_constant_override("v_separation", 10)
 	content.add_child(identity_grid)
 
-	identity_grid.add_child(_label("Character name"))
+	var name_label := _label("Character name")
+	name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	name_label.custom_minimum_size.x = 160
+	identity_grid.add_child(name_label)
 	name_input = LineEdit.new()
 	name_input.text = draft_name
 	name_input.placeholder_text = "Traveler"
+	name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_input.custom_minimum_size.y = 42
 	identity_grid.add_child(name_input)
 
@@ -254,23 +274,47 @@ func _show_identity() -> void:
 	appearance_input = TextEdit.new()
 	appearance_input.text = draft_appearance
 	appearance_input.placeholder_text = "Describe what your character looks like..."
+	appearance_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	appearance_input.custom_minimum_size = Vector2(0, 90)
 	content.add_child(appearance_input)
 
 	content.add_child(HSeparator.new())
+	content.add_child(_heading("LET AI BUILD YOUR STATS (OPTIONAL)"))
+	content.add_child(_muted("Describe the playstyle you want and the AI will spend exactly 42 SP for you. You can still adjust the result afterward."))
+	var ai_row := HBoxContainer.new()
+	ai_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ai_row.add_theme_constant_override("separation", 10)
+	content.add_child(ai_row)
+	ai_build_input = LineEdit.new()
+	ai_build_input.text = draft_build_request
+	ai_build_input.placeholder_text = "Example: a fast stealth fighter who uses precise ranged attacks"
+	ai_build_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ai_build_input.custom_minimum_size.y = 44
+	ai_row.add_child(ai_build_input)
+	var ai_build := _button("BUILD MY STATS", false)
+	ai_build.custom_minimum_size = Vector2(190, 44)
+	ai_build.pressed.connect(_generate_ai_stats)
+	ai_row.add_child(ai_build)
+
+	content.add_child(HSeparator.new())
 	var sp_row := HBoxContainer.new()
+	sp_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(sp_row)
 	sp_row.add_child(_heading("CORE STATS"))
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sp_row.add_child(spacer)
 	remaining_label = _heading("42 SP REMAINING")
+	remaining_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	remaining_label.custom_minimum_size.x = 210
+	remaining_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	sp_row.add_child(remaining_label)
 
 	content.add_child(_muted("Most check bonuses gain about +1 for every 3 stat points early on. Natural stat cap is 100."))
 
 	stat_controls.clear()
 	var grid := GridContainer.new()
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 7)
@@ -280,17 +324,21 @@ func _show_identity() -> void:
 	grid.add_child(_muted("WHAT IT DOES"))
 	for stat in STATS:
 		var stat_name := _label(stat.capitalize())
+		stat_name.autowrap_mode = TextServer.AUTOWRAP_OFF
+		stat_name.custom_minimum_size.x = 150
 		grid.add_child(stat_name)
 		var spin := SpinBox.new()
 		spin.min_value = 0
 		spin.max_value = 42
 		spin.step = 1
-		spin.custom_minimum_size = Vector2(100, 38)
+		spin.allow_greater = false
+		spin.custom_minimum_size = Vector2(110, 38)
 		spin.value = int(draft_stats.get(stat, 0))
-		spin.value_changed.connect(_on_stats_changed)
+		spin.value_changed.connect(_on_stats_changed.bind(stat))
 		stat_controls[stat] = spin
 		grid.add_child(spin)
 		var effect := _muted(str(STAT_EFFECTS.get(stat, "Core character stat")))
+		effect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		effect.custom_minimum_size.x = 430
 		grid.add_child(effect)
 
@@ -313,8 +361,31 @@ func _show_identity() -> void:
 	row.add_child(generate)
 
 
-func _on_stats_changed(_value: float) -> void:
+func _on_stats_changed(value: float, changed_stat: String) -> void:
+	if updating_stat_controls:
+		return
+	var stats := _read_stats()
+	var spent := 0
+	for stat in STATS:
+		spent += int(stats.get(stat, 0))
+	if spent > 42:
+		var changed_spin = stat_controls.get(changed_stat)
+		if changed_spin != null:
+			updating_stat_controls = true
+			changed_spin.value = maxi(0, int(value) - (spent - 42))
+			updating_stat_controls = false
 	_update_stat_summary()
+
+
+func _generate_ai_stats() -> void:
+	if busy:
+		return
+	draft_build_request = ai_build_input.text.strip_edges()
+	if draft_build_request.is_empty():
+		_set_error("Describe the build you want the AI to make first.")
+		return
+	_set_status("The AI is building a legal 42-SP stat setup for your playstyle...")
+	_post("/creation/stats/generate", {"description": draft_build_request}, "stats_generate")
 
 
 func _read_stats() -> Dictionary:
@@ -332,11 +403,17 @@ func _update_stat_summary() -> void:
 	var spent := 0
 	for stat in STATS:
 		spent += int(stats.get(stat, 0))
-	var remaining := 42 - spent
+	var remaining: int = maxi(0, 42 - spent)
 	remaining_label.text = "%d SP REMAINING" % remaining
-	remaining_label.add_theme_color_override("font_color", SUCCESS if remaining == 0 else (DANGER if remaining < 0 else TEXT))
+	remaining_label.add_theme_color_override("font_color", SUCCESS if remaining == 0 else TEXT)
+	updating_stat_controls = true
+	for stat in STATS:
+		var spin = stat_controls.get(stat)
+		if spin != null:
+			spin.max_value = mini(42, int(spin.value) + remaining)
+	updating_stat_controls = false
 	if derived_label != null:
-		var hp := max(1, int(stats.get("health", 0)) * 5)
+		var hp: int = maxi(1, int(stats.get("health", 0)) * 5)
 		var resource := int(stats.get("resource", 0)) * 5
 		derived_label.text = "Current preview:  %d Max HP  •  %d Max Resource  •  Crit starts at %d%%+  •  Speed controls movement/initiative" % [hp, resource, 5 + int(stats.get("luck", 0)) / 3]
 
@@ -496,7 +573,7 @@ func _show_armor() -> void:
 		button.text = _armor_text(armor)
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.custom_minimum_size.y = 76
-		button.button_pressed = i == clamp(selected_armor_index, 0, max(0, armor_options.size() - 1))
+		button.button_pressed = i == selected_armor_index
 		button.pressed.connect(_select_armor.bind(i))
 		armor_buttons.append(button)
 		content.add_child(button)
@@ -529,15 +606,18 @@ func _show_armor() -> void:
 	back.custom_minimum_size.y = 48
 	back.pressed.connect(_show_choices)
 	row.add_child(back)
-	var finish := _button("BEGIN ADVENTURE", true)
-	finish.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	finish.custom_minimum_size.y = 48
-	finish.pressed.connect(_finalize_character)
-	row.add_child(finish)
+	finish_button = _button("BEGIN ADVENTURE", true)
+	finish_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	finish_button.custom_minimum_size.y = 48
+	finish_button.visible = selected_armor_index >= 0
+	finish_button.pressed.connect(_finalize_character)
+	row.add_child(finish_button)
 
 
 func _select_armor(index: int) -> void:
 	selected_armor_index = index
+	if finish_button != null:
+		finish_button.visible = true
 
 
 func _generate_custom_armor() -> void:
@@ -547,7 +627,7 @@ func _generate_custom_armor() -> void:
 	if request.is_empty():
 		_set_error("Describe the custom armor you want first.")
 		return
-	selected_armor_index = 0
+	selected_armor_index = -1
 	_set_status("Turning your description into balanced Beginner armor...")
 	_post("/creation/armor/generate", {"custom_request": request}, "armor_generate")
 
@@ -555,7 +635,7 @@ func _generate_custom_armor() -> void:
 func _generate_three_armor() -> void:
 	if busy:
 		return
-	selected_armor_index = 0
+	selected_armor_index = -1
 	_set_status("Generating three Beginner armor choices...")
 	_post("/creation/armor/generate", {}, "armor_generate")
 
@@ -563,8 +643,8 @@ func _generate_three_armor() -> void:
 func _finalize_character() -> void:
 	if busy:
 		return
-	if armor_options.is_empty():
-		_set_error("Generate and choose armor before beginning the adventure.")
+	if armor_options.is_empty() or selected_armor_index < 0 or selected_armor_index >= armor_options.size():
+		_set_error("Choose your starting armor before beginning the adventure.")
 		return
 	_set_status("Finishing your character and generating the opening scene...")
 	_post("/creation/finalize", {
@@ -607,6 +687,21 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			_show_world_review()
 		"world_confirm":
 			_show_identity()
+		"stats_generate":
+			var allocation = payload.get("stats", {}) if payload.get("stats", {}) is Dictionary else {}
+			updating_stat_controls = true
+			for stat in STATS:
+				var spin = stat_controls.get(stat)
+				if spin != null:
+					spin.max_value = 42
+			for stat in STATS:
+				var spin = stat_controls.get(stat)
+				if spin != null:
+					spin.value = int(allocation.get(stat, 0))
+			updating_stat_controls = false
+			draft_stats = _read_stats()
+			_update_stat_summary()
+			_set_status("AI build applied. All 42 SP are spent, and you can still adjust the stats.")
 		"character_generate":
 			package = payload.get("package", {}) if payload.get("package", {}) is Dictionary else {}
 			derived = payload.get("derived", {}) if payload.get("derived", {}) is Dictionary else {}
@@ -616,7 +711,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			_show_choices()
 		"armor_generate":
 			armor_options = payload.get("armor_options", []) if payload.get("armor_options", []) is Array else []
-			selected_armor_index = 0
+			selected_armor_index = -1
 			_show_armor()
 		"finalize":
 			_finish_into_game(payload)
@@ -651,21 +746,17 @@ func _set_error(message: String) -> void:
 func _world_text(world: Dictionary) -> String:
 	var lines: Array[String] = []
 	lines.append(str(world.get("name", "Untitled World")).to_upper())
-	lines.append(str(world.get("premise", "")))
-	for pair in [
-		["Genre", "genre"], ["Era", "era"], ["Tone", "tone"],
-		["Technology", "technology_level"], ["Powers / Supernatural", "supernatural_rules"],
-		["Society", "government_and_society"], ["Economy", "economy"], ["Currency", "currency_name"]
-	]:
+	var premise := str(world.get("premise", "")).strip_edges()
+	if not premise.is_empty():
+		lines.append(premise)
+	var details: Array[String] = []
+	for pair in [["Genre", "genre"], ["Era", "era"], ["Tone", "tone"]]:
 		var value = world.get(pair[1])
 		if value != null and not str(value).is_empty():
-			lines.append("\n%s: %s" % [pair[0], str(value)])
-	for pair in [["Factions", "factions"], ["Important Locations", "important_locations"], ["Common Gear", "common_weapons_and_gear"], ["Major Conflicts", "major_conflicts"]]:
-		var values = world.get(pair[1])
-		if values is Array and not values.is_empty():
-			lines.append("\n%s:" % pair[0])
-			for value in values:
-				lines.append("  • " + str(value))
+			details.append("%s: %s" % [pair[0], str(value)])
+	if not details.is_empty():
+		lines.append("\n" + "  •  ".join(details))
+	lines.append("\nLocations, factions, conflicts, and secrets will be discovered during the adventure.")
 	return "\n".join(lines)
 
 
