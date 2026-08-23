@@ -31,6 +31,11 @@ var location_label: Label
 var weapon_label: Label
 var story_text: RichTextLabel
 var suggestions_box: VBoxContainer
+var roll_panel: PanelContainer
+var roll_title: Label
+var roll_details: Label
+var roll_button: Button
+var pending_roll: Dictionary = {}
 var action_input: LineEdit
 var send_button: Button
 var context_title: Label
@@ -195,6 +200,31 @@ func _build_story_panel() -> PanelContainer:
 	var divider := HSeparator.new()
 	box.add_child(divider)
 
+	roll_panel = _panel(Color("171324"))
+	roll_panel.visible = false
+	var roll_margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		roll_margin.add_theme_constant_override(side, 14)
+	roll_panel.add_child(roll_margin)
+	var roll_box := VBoxContainer.new()
+	roll_box.add_theme_constant_override("separation", 8)
+	roll_margin.add_child(roll_box)
+	roll_title = Label.new()
+	roll_title.text = "ROLL REQUIRED"
+	roll_title.add_theme_font_size_override("font_size", 16)
+	roll_title.add_theme_color_override("font_color", ACCENT_HOVER)
+	roll_box.add_child(roll_title)
+	roll_details = Label.new()
+	roll_details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	roll_details.add_theme_font_size_override("font_size", 14)
+	roll_details.add_theme_color_override("font_color", TEXT)
+	roll_box.add_child(roll_details)
+	roll_button = _make_button("ROLL DICE", true)
+	roll_button.custom_minimum_size.y = 44
+	roll_button.pressed.connect(_roll_pending)
+	roll_box.add_child(roll_button)
+	box.add_child(roll_panel)
+
 	var suggestions_heading := Label.new()
 	suggestions_heading.text = "SUGGESTED ACTIONS"
 	suggestions_heading.add_theme_font_size_override("font_size", 13)
@@ -327,7 +357,7 @@ func _send_from_input() -> void:
 
 func _send_action(action: String) -> void:
 	var clean := action.strip_edges()
-	if clean.is_empty() or busy:
+	if clean.is_empty() or busy or not pending_roll.is_empty():
 		return
 	story_history.append("YOU: " + clean)
 	_refresh_story()
@@ -342,14 +372,33 @@ func _send_action(action: String) -> void:
 	var err := http.request(API_BASE + "/action", headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
 		busy = false
-		_set_inputs_enabled(true)
+		_set_inputs_enabled(pending_roll.is_empty())
 		_set_connection_error("Could not send action")
+
+
+func _roll_pending() -> void:
+	if busy or pending_roll.is_empty():
+		return
+	busy = true
+	_set_inputs_enabled(false)
+	roll_button.disabled = true
+	request_mode = "roll"
+	connection_label.text = "Rolling..."
+	connection_label.add_theme_color_override("font_color", MUTED)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var err := http.request(API_BASE + "/roll", headers, HTTPClient.METHOD_POST, "{}")
+	if err != OK:
+		busy = false
+		roll_button.disabled = false
+		_set_connection_error("Could not roll dice")
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	busy = false
-	_set_inputs_enabled(true)
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		_set_inputs_enabled(pending_roll.is_empty())
+		if is_instance_valid(roll_button):
+			roll_button.disabled = false
 		_set_connection_error("Backend unavailable — run: python -m backend.api")
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
@@ -358,11 +407,17 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	var payload: Dictionary = parsed
 	if not payload.get("ok", false):
+		_set_inputs_enabled(pending_roll.is_empty())
+		if is_instance_valid(roll_button):
+			roll_button.disabled = false
 		_set_connection_error(str(payload.get("error", "Unknown backend error")))
 		return
 	connection_label.text = "● BACKEND CONNECTED"
 	connection_label.add_theme_color_override("font_color", SUCCESS)
 	latest_state = payload.get("state", {}) if payload.get("state", {}) is Dictionary else {}
+	var roll_data = payload.get("pending_roll", latest_state.get("pending_roll", {}))
+	_render_pending_roll(roll_data)
+	_set_inputs_enabled(pending_roll.is_empty())
 	_update_player_panel()
 	if request_mode == "session":
 		story_history.clear()
@@ -372,6 +427,50 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_refresh_story()
 	_set_suggestions(payload.get("suggested_actions", []))
 	_show_context("player")
+
+
+func _render_pending_roll(raw) -> void:
+	pending_roll = raw.duplicate(true) if raw is Dictionary else {}
+	if pending_roll.is_empty():
+		roll_panel.visible = false
+		roll_button.disabled = false
+		return
+
+	var kind := str(pending_roll.get("kind", "check"))
+	var expression := str(pending_roll.get("expression", "1d20"))
+	var purpose := str(pending_roll.get("purpose", "Resolve the action"))
+	var modifier := int(pending_roll.get("modifier", 0))
+	var dc_value = pending_roll.get("dc")
+	roll_title.text = "DAMAGE ROLL" if kind == "damage" else ("ATTACK ROLL" if kind == "attack" else "CHECK ROLL")
+	var lines: Array[String] = ["Rolling for: " + purpose]
+	var roll_line := "Roll: %s %s" % [expression, _signed(modifier)]
+	if dc_value != null:
+		roll_line += "   •   DC: %d" % int(dc_value)
+	lines.append(roll_line)
+
+	var breakdown = pending_roll.get("modifier_breakdown", [])
+	if breakdown is Array and not breakdown.is_empty():
+		lines.append("Bonuses:")
+		for raw_item in breakdown:
+			if raw_item is Dictionary:
+				lines.append("  • %s: %s" % [str(raw_item.get("source", "Bonus")), _signed(int(raw_item.get("value", 0)))])
+	var dc_breakdown = pending_roll.get("dc_breakdown", [])
+	if dc_breakdown is Array and not dc_breakdown.is_empty():
+		lines.append("DC comes from:")
+		for raw_item in dc_breakdown:
+			if raw_item is Dictionary:
+				lines.append("  • %s: %d" % [str(raw_item.get("source", "Defense")), int(raw_item.get("value", 0))])
+	var note := str(pending_roll.get("armor_bonus_note", "")).strip_edges()
+	if not note.is_empty():
+		lines.append(note)
+	roll_details.text = "\n".join(lines)
+	roll_button.text = ("ROLL %s DAMAGE" % expression.to_upper()) if kind == "damage" else ("ROLL %s" % expression.to_upper())
+	roll_button.disabled = false
+	roll_panel.visible = true
+
+
+func _signed(value: int) -> String:
+	return "+%d" % value if value >= 0 else str(value)
 
 
 func _set_connection_error(message: String) -> void:
