@@ -72,8 +72,18 @@ func apply_payload(payload: Dictionary) -> void:
 		_load_portrait_texture(portrait_base64)
 	elif "portrait_available" in payload and not bool(payload.get("portrait_available", false)):
 		portrait_texture = null
-	set_status(str(payload.get("message", "")), false)
+	var message := str(payload.get("message", ""))
+	set_status(message, false)
 	_render()
+	var equipment_change = payload.get("equipment_change")
+	if equipment_change is Dictionary:
+		var changed_slot := str(equipment_change.get("slot", ""))
+		var change_type := "unequip" if equipment_change.has("unequipped") else "equip"
+		if changed_slot.is_empty():
+			var equipped_piece = equipment_change.get("equipped")
+			if equipped_piece is Dictionary:
+				changed_slot = str(equipped_piece.get("slot", ""))
+		call_deferred("_refresh_art_after_armor_change", changed_slot, change_type)
 
 
 func set_status(message: String, is_error: bool = false) -> void:
@@ -465,6 +475,15 @@ func _load_portrait_texture(encoded: String) -> void:
 		set_status("The generated character art could not be displayed.", true)
 		return
 	portrait_texture = ImageTexture.create_from_image(generated_image)
+
+
+func _refresh_art_after_armor_change(changed_slot: String, change_type: String) -> void:
+	set_status("Armor changed. Updating the character picture...", false)
+	_request(
+		"/character/portrait/generate",
+		{"changed_slot": changed_slot, "change_type": change_type},
+		"character_portrait"
+	)
 
 
 func _combat_active() -> bool:
