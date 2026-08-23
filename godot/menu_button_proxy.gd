@@ -41,7 +41,9 @@ func _process(_delta: float) -> void:
 	if overlay == null:
 		overlay = get_parent().get_node_or_null("MenuOverlay")
 	var creator = get_parent().get_node_or_null("CharacterCreation")
-	var creator_is_open := creator != null and creator.visible
+	var creator_is_open: bool = false
+	if creator != null:
+		creator_is_open = bool(creator.visible)
 	visible = (overlay == null or not overlay.visible) and not creator_is_open
 
 
