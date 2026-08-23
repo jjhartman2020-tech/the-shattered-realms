@@ -179,6 +179,7 @@ def install_armor_runtime(game_master) -> None:
 
     import backend.ai.game_master as gm_module
     original_attack = gm_module.resolve_attack; original_ability = gm_module.resolve_ability
+    original_prepared_damage = gm_module.resolve_prepared_damage_roll
     def attack_with_armor(combat, attacker_name, target_name, **kwargs):
         resources = _resource_snapshot(combat); was_active = bool(combat.get("active")); outcome = original_attack(combat, attacker_name, target_name, **kwargs); engine_ended = was_active and not combat.get("active"); outcome = _retrofit_armor_after_damage(combat, outcome, target_name)
         if engine_ended and combat.get("active"): _restore_resources(combat, resources)
@@ -187,7 +188,16 @@ def install_armor_runtime(game_master) -> None:
         resources = _resource_snapshot(combat); was_active = bool(combat.get("active")); outcome = original_ability(combat, actor_name, ability_name, target_name, **kwargs); engine_ended = was_active and not combat.get("active"); outcome = _retrofit_armor_after_damage(combat, outcome, str(outcome.get("target") or target_name or actor_name))
         if engine_ended and combat.get("active"): _restore_resources(combat, resources, ability_actor=actor_name, ability_after=int(outcome.get("resource_after", resources.get(actor_name, (0,0))[0]) or 0))
         return outcome
+    def prepared_damage_with_armor(combat, pending):
+        target_name = str(pending.get("target") or "")
+        resources = _resource_snapshot(combat); was_active = bool(combat.get("active"))
+        outcome = original_prepared_damage(combat, pending)
+        engine_ended = was_active and not combat.get("active")
+        outcome = _retrofit_armor_after_damage(combat, outcome, target_name)
+        if engine_ended and combat.get("active"): _restore_resources(combat, resources)
+        return outcome
     gm_module.resolve_attack = attack_with_armor; gm_module.resolve_ability = ability_with_armor
+    gm_module.resolve_prepared_damage_roll = prepared_damage_with_armor
 
 
 def finish_character_creation_with_armor(game_master, created: Dict) -> Dict:
