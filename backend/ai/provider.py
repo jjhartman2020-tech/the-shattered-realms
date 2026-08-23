@@ -231,7 +231,7 @@ When requires_roll=true, roll contains reason, difficulty, skill, and attribute 
         response = self.client.responses.create(
             model=self.model,
             instructions=system_instructions,
-            input=serialize_context(context),
+            input="Respond with one valid JSON object only.\n\n" + serialize_context(context),
             text={"format": {"type": "json_object"}},
         )
         raw = response.output_text.strip()
