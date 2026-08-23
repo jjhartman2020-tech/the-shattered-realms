@@ -155,8 +155,14 @@ def cached_character_portrait(output_path: Path) -> str:
     return ""
 
 
-def generate_character_portrait(game_master, output_path: Path) -> str:
-    """Generate and cache full-body character art from authoritative saved data."""
+def generate_character_portrait(
+    game_master,
+    output_path: Path,
+    *,
+    changed_slot: str = "",
+    change_type: str = "",
+) -> str:
+    """Generate or edit cached full-body art from authoritative equipped armor."""
     player = _player(game_master)
     client = getattr(game_master.provider, "client", None)
     if client is None or not hasattr(client, "images"):
@@ -169,11 +175,32 @@ def generate_character_portrait(game_master, output_path: Path) -> str:
     armor_details = []
     for slot in ARMOR_SLOTS:
         piece = equipped.get(slot)
-        if not isinstance(piece, dict):
-            continue
-        armor_details.append(
-            f"{slot}: {piece.get('name', 'armor')} — {piece.get('description', 'match the established design')}"
-        )
+        if isinstance(piece, dict):
+            armor_details.append(
+                f"{slot.upper()}: EQUIPPED — unique item '{piece.get('name', 'armor')}'. "
+                f"Visual design: {piece.get('description', 'invent a distinct design matching its exact name and setting')}"
+            )
+        else:
+            armor_details.append(
+                f"{slot.upper()}: EMPTY — show normal clothing/body at this slot and remove any armor piece previously shown there"
+            )
+
+    change_instruction = ""
+    normalized_slot = str(changed_slot or "").strip().lower()
+    normalized_change = str(change_type or "").strip().lower()
+    if normalized_slot in ARMOR_SLOTS:
+        if normalized_change == "unequip":
+            change_instruction = (
+                f"IMPORTANT CURRENT EDIT: the {normalized_slot} was just UNEQUIPPED. Completely remove the old "
+                f"{normalized_slot} armor while leaving the character's identity and unrelated slots unchanged."
+            )
+        elif normalized_change == "equip":
+            current_piece = equipped.get(normalized_slot, {})
+            change_instruction = (
+                f"IMPORTANT CURRENT EDIT: the {normalized_slot} was just changed to "
+                f"'{current_piece.get('name', 'the newly equipped item')}'. Completely replace the previous "
+                f"{normalized_slot} design with this new item's visibly different silhouette, materials, colors, and details."
+            )
 
     prompt = f"""Create original full-body character concept art for a text RPG character screen.
 Show one fully clothed character, head to toe, in a neutral readable pose on a simple atmospheric background. No text, labels, UI, logos, gore, or sexualized presentation. Keep the design suitable for a teen-rated adventure game. If the description names an existing copyrighted character, reinterpret the idea into a clearly original design rather than copying that character.
@@ -184,22 +211,37 @@ Class/build: {player.get('class', 'unassigned')}
 Saved appearance: {player.get('appearance', 'Use a distinctive original adventurer design.')}
 World name/genre: {world.get('name', world.get('title', 'The Shattered Realms'))} / {world.get('genre', world.get('setting', 'adaptive fantasy and science fiction'))}
 World visual direction: {world.get('description', world.get('summary', world.get('tone', 'Match the established game world.')))}
-Currently worn armor: {'; '.join(armor_details) if armor_details else 'No equipped armor; show practical setting-appropriate clothing.'}
+AUTHORITATIVE ARMOR SLOTS (follow every slot exactly):
+{chr(10).join(armor_details)}
+{change_instruction}
 
-Use polished, detailed, colorful digital illustration with a strong readable silhouette. The equipped armor and saved appearance must be visibly reflected."""
+Use polished, detailed, colorful digital illustration with a strong readable silhouette. Preserve the same face, hair, body design, pose, framing, art style, and background when an earlier portrait is supplied. Only change armor that differs from the authoritative slots. Every named armor item is a unique visual design: swapping between two helmets must produce two clearly different helmets, not a recolor of the same helmet."""
 
     model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1.5").strip() or "gpt-image-1.5"
     quality = os.getenv("OPENAI_IMAGE_QUALITY", "medium").strip().lower()
     if quality not in {"low", "medium", "high", "auto"}:
         quality = "medium"
-    result = client.images.generate(
-        model=model,
-        prompt=prompt,
-        n=1,
-        size="1024x1536",
-        quality=quality,
-        output_format="png",
-    )
+    if output_path.is_file():
+        with output_path.open("rb") as source_image:
+            result = client.images.edit(
+                model=model,
+                image=source_image,
+                prompt=prompt,
+                n=1,
+                size="1024x1536",
+                quality=quality,
+                output_format="png",
+                input_fidelity="high",
+            )
+    else:
+        result = client.images.generate(
+            model=model,
+            prompt=prompt,
+            n=1,
+            size="1024x1536",
+            quality=quality,
+            output_format="png",
+        )
     entries = getattr(result, "data", None)
     encoded = getattr(entries[0], "b64_json", "") if entries else ""
     if not encoded:
