@@ -29,7 +29,7 @@ from backend.game.attributes import (
     validate_allocation,
 )
 from backend.game.abilities import resolve_ability
-from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack
+from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, prepare_attack, resolve_attack
 from backend.game.dice import normalize_damage_expression
 from backend.game.economy import currency_profile, ensure_wallet, format_money
 from backend.game.progression import xp_required_for_next_level
@@ -106,6 +106,7 @@ def _session_payload() -> Dict:
         "ok": True,
         "narration": _resume_text(state),
         "suggested_actions": [],
+        "pending_roll": deepcopy(state.get("pending_roll")) if isinstance(state.get("pending_roll"), dict) else {},
         "state": state,
         "money_text": money,
         "creation_required": not bool(player.get("character_creation_complete")),
@@ -386,6 +387,13 @@ def _finalize_character_payload(payload: Dict) -> Dict:
 
 
 def _direct_end_turn() -> Dict | None:
+    if isinstance(GAME_MASTER.state.data.get("pending_roll"), dict) and GAME_MASTER.state.data.get("pending_roll"):
+        return {
+            "narration": "Finish the waiting attack or damage roll first.",
+            "suggested_actions": [],
+            "pending_roll": deepcopy(GAME_MASTER.state.data.get("pending_roll")),
+            "state": GAME_MASTER.state.snapshot(),
+        }
     combat = GAME_MASTER.state.data.get("combat")
     if not isinstance(combat, dict) or not combat.get("active"):
         return None
@@ -426,6 +434,8 @@ def _combat_response(narration: str, events: List[Dict], combat: Dict) -> Dict:
 
 
 def _player_combat_context() -> tuple[Dict, Dict, str]:
+    if isinstance(GAME_MASTER.state.data.get("pending_roll"), dict) and GAME_MASTER.state.data.get("pending_roll"):
+        raise ValueError("Finish the waiting dice roll before moving or choosing another action.")
     combat = GAME_MASTER.state.data.get("combat")
     if not isinstance(combat, dict) or not combat.get("active"):
         raise ValueError("No tactical battle is active.")
@@ -484,7 +494,7 @@ def _direct_combat_action(payload: Dict, action_type: str) -> Dict:
             attack_attribute = str(weapon.get("attack_attribute") or "strength").lower()
             if attack_attribute not in {"strength", "dexterity", "magic"}:
                 attack_attribute = "strength"
-            event = resolve_attack(
+            pending = prepare_attack(
                 combat,
                 player_name,
                 target,
@@ -493,12 +503,12 @@ def _direct_combat_action(payload: Dict, action_type: str) -> Dict:
                 damage_expression=str(weapon.get("damage") or player.get("damage") or "1d4"),
                 enforce_turn=True,
             )
-            events.append({"type": "player_attack", **event})
-            narration = f"{player_name} attacks {target}."
-            if combat.get("active"):
-                events.append({"type": "player_end_turn", "actor": player_name, "automatic": True})
-                end_turn(combat)
-                events.extend(GAME_MASTER._run_enemy_turns(combat))
+            pending["action"] = f"Attack {target}"
+            GAME_MASTER.state.data["pending_roll"] = deepcopy(pending)
+            events.append({"type": "player_attack_declared", "attacker": player_name, "target": target, "turn_locked": True})
+            response = _combat_response(f"Attack declared against {target}. Roll to see if it hits.", events, combat)
+            response.update({"requires_roll": True, "roll": deepcopy(pending), "pending_roll": deepcopy(pending)})
+            return response
 
         elif action_type == "ability":
             ability_name = str(payload.get("ability") or "").strip()
@@ -607,6 +617,17 @@ def _handle_action(action: str) -> Dict:
     clean = str(action or "").strip()
     if not clean:
         return {"ok": False, "error": "Action cannot be empty."}
+    pending = GAME_MASTER.state.data.get("pending_roll")
+    if isinstance(pending, dict) and pending:
+        return {
+            "ok": True,
+            "narration": "Finish the waiting dice roll before choosing another action.",
+            "suggested_actions": [],
+            "requires_roll": True,
+            "roll": deepcopy(pending),
+            "pending_roll": deepcopy(pending),
+            "state": GAME_MASTER.state.snapshot(),
+        }
     lowered = clean.lower()
     if lowered in {"end turn", "end my turn", "pass turn", "pass my turn"}:
         direct = _direct_end_turn()
@@ -616,6 +637,15 @@ def _handle_action(action: str) -> Dict:
     result = GAME_MASTER.handle_action(clean)
     result["ok"] = True
     return _json_safe(result)
+
+
+def _handle_roll() -> Dict:
+    try:
+        result = GAME_MASTER.resolve_pending_roll()
+        result["ok"] = True
+        return _json_safe(result)
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -655,6 +685,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 if self.path == "/action":
                     result = _handle_action(str(payload.get("action") or ""))
+                elif self.path == "/roll":
+                    result = _handle_roll()
                 elif self.path == "/world/area/generate":
                     result = _world_area_payload(payload)
                 elif self.path == "/prototype/battle/start":
