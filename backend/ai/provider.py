@@ -5,6 +5,30 @@ import os
 from typing import Dict, Protocol
 
 
+LOOT_RULES = """
+
+LOOT / SEARCH / REWARD RULES
+- Loot must fit the CONFIRMED WORLD, current location, creature/NPC, faction, technology level, and scene. Never default to medieval fantasy gear in a modern, sci-fi, cyberpunk, superhero, western, or other non-medieval setting.
+- Searching enemies, bodies, containers, rooms, wrecks, caches, plants, harvestable creatures, quest rewards, and similar sources may reveal items. Do not force valuable loot from every source; sometimes there is nothing useful.
+- A search attempt counts as searching that source EVEN IF THE CHECK FAILS. Never later claim it was never searched.
+- Every distinct searchable/lootable source must have a stable lowercase source_id using underscores, such as `wild_cow_roadside_1`, `warehouse_locker_3`, or `gang_leader_body`.
+- Whenever a source is searched, emit {\"type\":\"mark_loot_source\",\"source_id\":\"...\",\"searched\":true,\"looted\":false,\"result\":\"brief result\"}. If items are actually taken from that source, set looted=true. Python persists this under world_flags.loot_sources.
+- Before offering or resolving another search/loot action, check game_state.world_flags.loot_sources. If that source is already searched, do not regenerate its hidden contents or pretend it is fresh. If it was already looted, there is no duplicate loot unless the story explicitly establishes a new deposit later.
+- If an already-searched source had unretrieved visible items, those same established items may still be taken; do not reroll or replace them with different loot.
+- When the player successfully TAKES an item, use add_inventory_item in the same response. Narration alone never puts an item in inventory.
+- Every generated item must have: name, type, description, quantity, rarity, and sell_value. rarity must be exactly Common, Uncommon, Rare, Epic, or Legendary.
+- Rarity measures how exceptional the item is, not merely how flashy its name sounds. Common should dominate ordinary loot; Uncommon appears sometimes; Rare is genuinely notable; Epic is very scarce; Legendary should be story/boss/endgame-level and never routine.
+- Loot power must scale with player level, source difficulty, location danger, quest significance, and enemy importance. Early ordinary enemies should mostly drop Common gear/materials and modest consumables. Do not hand out major upgrades constantly.
+- Stronger rarity does not bypass normal mechanics: weapons still use damage dice/range/attack_attribute; shields use Shield HP; armor is one of helmet/breastplate/pants/gloves/boots and uses Armor HP/weight/optional small stat_bonus; consumables have exact effects.
+- Whole armor sets may occasionally be rewards, caches, boss loot, or special finds, but ordinary drops should usually be individual pieces.
+- Equipment must remain balanced for the current stage of progression. A low-level Legendary story object can exist, but if it is combat gear its usable numbers must not trivialize the game unless the story intentionally grants an exceptional endgame-level reward.
+- Currency or valuables can also be found when appropriate to the world, but never assume gold. Use the world's economy/currency (credits, dollars, gold, caps, crowns, etc.).
+- When loot is discovered, clearly state what was found and the important mechanics. Example format: `Found: Compact Blaster [Common] — Damage 1d6 | Range 6 | Sell Value 9 credits.` Keep the wording natural to the world.
+- Harvested materials should normally be materials/ingredients rather than magically becoming finished gear. Animals should drop plausible materials, food, trophies, or carried objects—not random swords or coins unless there is a story reason.
+- Quest rewards and boss drops may be better than random exploration loot, but still follow progression balance and rarity rules.
+"""
+
+
 class AIProvider(Protocol):
     def respond(self, context: Dict) -> Dict:
         ...
@@ -85,7 +109,8 @@ INVENTORY / ITEM RULES
 - The persistent player inventory is authoritative. Do not narrate that an item was picked up, looted, harvested, received, purchased, or otherwise taken into the player's possession without also adding it to inventory.
 - Whenever the player SUCCESSFULLY takes or receives a physical item, include a state_changes entry exactly like {\"type\":\"add_inventory_item\",\"item\":{...}}.
 - This applies to ordinary objects too: flowers, keys, notes, materials, food, tools, quest items, weapons, shields, armor pieces, relics, and loot.
-- The item object must include at least name, type, description, quantity, and sell_value. sell_value is a nonnegative integer representing its normal resale value; use 0 for truly unsellable quest/story objects.
+- The item object must include at least name, type, description, quantity, rarity, and sell_value. sell_value is a nonnegative integer representing its normal resale value; use 0 for truly unsellable quest/story objects.
+- rarity must be one of Common, Uncommon, Rare, Epic, Legendary.
 - Keep sell values modest and appropriate to the confirmed world's economy and the item's usefulness/rarity. Do not make ordinary flowers, scraps, or common supplies valuable.
 - Weapons must retain exact damage dice/range/attack_attribute. Shields retain Shield HP. Armor pieces retain slot/Armor HP/max Armor HP/weight/stat_bonus. Consumables retain exact mechanics.
 - Do not add an item merely because the player sees, examines, or talks about it. Add it only when possession actually changes.
@@ -129,7 +154,7 @@ COMBAT RULES
 - During combat use attack, move, move_attack, ability, defend, end_turn, or pass.
 - Targeted combat actions must use one exact living target name from active_combat. Never silently switch targets.
 - Do not invent abilities. Python validates ownership, Resource cost, range, hit, damage, and action cost.
-- Movement alone does not end the player's turn. After using a primary action, the player may still move if movement remains and then explicitly end turn.
+- Movement alone does not end the player's turn. A basic attack ends the player's turn immediately, so movement must happen before a basic attack.
 - If context contains enemy_turn, choose a legal tactical action using only information that enemy could know.
 - If context contains combat_result, narrate it exactly and do not issue another combat request.
 
@@ -147,6 +172,7 @@ Return ONLY valid JSON with this top-level shape:
 {\"narration\":\"player-facing description that advances the scene\",\"player_action\":\"interpreted action\",\"requires_roll\":false,\"roll\":null,\"combat_request\":null,\"state_changes\":[],\"memories\":[],\"world_notes\":[],\"suggested_actions\":[{\"text\":\"specific option 1\",\"requires_roll\":true,\"skill\":\"agility\"},{\"text\":\"specific option 2\",\"requires_roll\":false,\"skill\":null},{\"text\":\"specific option 3\",\"requires_roll\":true,\"skill\":\"intelligence\"}]}
 When requires_roll=true, roll contains reason, difficulty, skill, and attribute when known. Never reveal private chain-of-thought.
 """
+        system_instructions += LOOT_RULES
         response = self.client.responses.create(model=self.model, instructions=system_instructions, input=serialize_context(context))
         raw = response.output_text.strip()
         try:
