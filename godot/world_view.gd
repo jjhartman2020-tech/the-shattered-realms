@@ -47,6 +47,12 @@ var ground_style: String = "grass"
 var visual_features: Array = []
 var area_loaded: bool = false
 var pending_exit_direction: String = ""
+var area_coord := Vector2i.ZERO
+var loaded_areas: Dictionary = {}
+var area_render_cache: Dictionary = {}
+var pending_step_direction := Vector2i.ZERO
+var player_position_initialized: bool = false
+var loaded_world_signature: String = ""
 
 var title_label: Label
 var subtitle_label: Label
@@ -58,6 +64,9 @@ var suggestion_row: HBoxContainer
 var custom_action_input: LineEdit
 var custom_action_button: Button
 var suggestion_buttons: Array[Button] = []
+var character_button: Button
+var character_panel: PanelContainer
+var character_text: RichTextLabel
 var battle_panel: PanelContainer
 var battle_actions: VBoxContainer
 var status_label: Label
@@ -92,6 +101,7 @@ func show_from_payload(payload: Dictionary = {}) -> void:
 		game_state = payload.get("state", {})
 	elif not payload.is_empty() and payload.get("player") is Dictionary:
 		game_state = payload
+	_load_discovered_areas()
 	_apply_area_from_state()
 	_update_world_theme()
 	var combat: Dictionary = _combat()
@@ -99,6 +109,7 @@ func show_from_payload(payload: Dictionary = {}) -> void:
 	visible = true
 	player_visual = Vector2(player_tile)
 	_update_header()
+	_refresh_character_sheet()
 	_refresh_mode_interface()
 	var narration: String = str(payload.get("narration", "")).strip_edges()
 	if not narration.is_empty():
@@ -139,13 +150,48 @@ func _build_interface() -> void:
 
 	hint_label = Label.new()
 	hint_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	hint_label.position = Vector2(-500, 61)
-	hint_label.size = Vector2(360, 24)
+	hint_label.position = Vector2(-760, 61)
+	hint_label.size = Vector2(420, 24)
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	hint_label.text = "MOVE  WASD / ARROWS     INTERACT  E / SPACE"
+	hint_label.text = "MOVE  WASD / ARROWS     INTERACT  E / SPACE     CHARACTER  C"
 	hint_label.add_theme_font_size_override("font_size", 12)
 	hint_label.add_theme_color_override("font_color", MUTED)
 	add_child(hint_label)
+
+	character_button = _action_button("CHARACTER", _toggle_character_panel, 132)
+	character_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	character_button.offset_left = -296.0
+	character_button.offset_top = 18.0
+	character_button.offset_right = -156.0
+	character_button.offset_bottom = 58.0
+	character_button.z_index = 110
+	add_child(character_button)
+
+	character_panel = PanelContainer.new()
+	character_panel.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	character_panel.offset_left = -470.0
+	character_panel.offset_top = 78.0
+	character_panel.offset_right = -24.0
+	character_panel.offset_bottom = -24.0
+	character_panel.z_index = 105
+	character_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	character_panel.add_theme_stylebox_override("panel", _panel_style(Color("#182a31"), _palette_color("accent"), 3))
+	add_child(character_panel)
+	var sheet_margin := MarginContainer.new()
+	sheet_margin.add_theme_constant_override("margin_left", 18)
+	sheet_margin.add_theme_constant_override("margin_top", 16)
+	sheet_margin.add_theme_constant_override("margin_right", 18)
+	sheet_margin.add_theme_constant_override("margin_bottom", 16)
+	character_panel.add_child(sheet_margin)
+	character_text = RichTextLabel.new()
+	character_text.bbcode_enabled = true
+	character_text.scroll_active = true
+	character_text.fit_content = false
+	character_text.add_theme_font_size_override("normal_font_size", 16)
+	character_text.add_theme_font_size_override("bold_font_size", 18)
+	character_text.add_theme_color_override("default_color", INK)
+	sheet_margin.add_child(character_text)
+	character_panel.visible = false
 
 	dialogue_panel = PanelContainer.new()
 	dialogue_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -268,6 +314,8 @@ func _action_button(label_text: String, callback: Callable, minimum_width: int =
 func _build_world() -> void:
 	if current_area.is_empty():
 		current_area = {
+			"x": 0,
+			"y": 0,
 			"seed": 1337,
 			"name": "Generating Area",
 			"palette": "lush",
@@ -281,19 +329,26 @@ func _build_world() -> void:
 				{"name": "Local Guide", "role": "guide", "x": 28, "y": 21, "look": "friendly local clothing"},
 			],
 		}
-	area_palette = str(current_area.get("palette", "lush")).to_lower()
-	ground_style = str(current_area.get("ground_style", "grass")).to_lower()
-	visual_features = current_area.get("visual_features", []) if current_area.get("visual_features") is Array else []
-	area_landmarks = current_area.get("landmarks", []) if current_area.get("landmarks") is Array else []
-	area_npcs = current_area.get("npcs", []) if current_area.get("npcs") is Array else []
-	tree_tiles.clear()
-	rock_tiles.clear()
-	flower_tiles.clear()
-	lamp_tiles.clear()
-	landmark_doors.clear()
-	blocked.clear()
+	area_coord = Vector2i(int(current_area.get("x", area_coord.x)), int(current_area.get("y", area_coord.y)))
+	var key: String = _area_key(area_coord)
+	loaded_areas[key] = current_area.duplicate(true)
+	var cache: Dictionary = _build_area_cache(current_area)
+	area_render_cache[key] = cache
+	_apply_area_cache(current_area, cache)
 
-	for landmark_value in area_landmarks:
+
+func _build_area_cache(area: Dictionary) -> Dictionary:
+	var features: Array = area.get("visual_features", []) if area.get("visual_features") is Array else []
+	var landmarks: Array = area.get("landmarks", []) if area.get("landmarks") is Array else []
+	var npcs: Array = area.get("npcs", []) if area.get("npcs") is Array else []
+	var trees: Array[Vector2i] = []
+	var rocks: Array[Vector2i] = []
+	var flowers: Array[Vector2i] = []
+	var lamps: Array[Vector2i] = []
+	var doors: Dictionary = {}
+	var area_blocked: Dictionary = {}
+
+	for landmark_value in landmarks:
 		if not landmark_value is Dictionary:
 			continue
 		var landmark: Dictionary = landmark_value
@@ -303,47 +358,73 @@ func _build_world() -> void:
 		var height: int = maxi(4, int(landmark.get("height", 6)))
 		for y in range(top, mini(WORLD_ROWS, top + height)):
 			for x in range(left, mini(WORLD_COLS, left + width)):
-				blocked[Vector2i(x, y)] = true
+				area_blocked[Vector2i(x, y)] = true
 		var door := Vector2i(left + int(width / 2), top + height - 1)
-		landmark_doors[door] = landmark
+		doors[door] = landmark
 
-	if not area_npcs.is_empty() and area_npcs[0] is Dictionary:
-		npc_tile = Vector2i(int(area_npcs[0].get("x", 28)), int(area_npcs[0].get("y", 21)))
-
-	if _feature_enabled("water") or _feature_enabled("river") or _feature_enabled("pond"):
+	if _feature_in(features, "water") or _feature_in(features, "river") or _feature_in(features, "pond"):
 		for y in range(5, 12):
 			for x in range(4, 14):
 				if not ((x == 4 or x == 13) and (y == 5 or y == 11)):
-					blocked[Vector2i(x, y)] = true
+					area_blocked[Vector2i(x, y)] = true
 
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(current_area.get("seed", 1337))
-	var tree_count: int = 42 if _feature_enabled("trees") or _feature_enabled("snow_pines") else 10
-	var rock_count: int = 12 if _feature_enabled("rocks") or _feature_enabled("crystals") or _feature_enabled("cactus") else 5
-	var flower_count: int = 24 if _feature_enabled("flowers") or _feature_enabled("coral") else 7
-	var lamp_count: int = 12 if _feature_enabled("street_lights") or _feature_enabled("holograms") else 0
-	_scatter_tiles(rng, tree_tiles, tree_count, true)
-	_scatter_tiles(rng, rock_tiles, rock_count, true)
-	_scatter_tiles(rng, flower_tiles, flower_count, false)
-	_scatter_tiles(rng, lamp_tiles, lamp_count, false)
-	for tile in tree_tiles:
-		blocked[tile] = true
-	for tile in rock_tiles:
-		blocked[tile] = true
+	rng.seed = int(area.get("seed", 1337))
+	var tree_count: int = 42 if _feature_in(features, "trees") or _feature_in(features, "snow_pines") else 10
+	var rock_count: int = 12 if _feature_in(features, "rocks") or _feature_in(features, "crystals") or _feature_in(features, "cactus") else 5
+	var flower_count: int = 24 if _feature_in(features, "flowers") or _feature_in(features, "coral") else 7
+	var lamp_count: int = 12 if _feature_in(features, "street_lights") or _feature_in(features, "holograms") else 0
+	_scatter_area_tiles(rng, trees, tree_count, true, area_blocked, doors, npcs, trees, rocks, flowers, lamps)
+	_scatter_area_tiles(rng, rocks, rock_count, true, area_blocked, doors, npcs, trees, rocks, flowers, lamps)
+	_scatter_area_tiles(rng, flowers, flower_count, false, area_blocked, doors, npcs, trees, rocks, flowers, lamps)
+	_scatter_area_tiles(rng, lamps, lamp_count, false, area_blocked, doors, npcs, trees, rocks, flowers, lamps)
+	for tile in trees:
+		area_blocked[tile] = true
+	for tile in rocks:
+		area_blocked[tile] = true
+	return {"trees": trees, "rocks": rocks, "flowers": flowers, "lamps": lamps, "doors": doors, "blocked": area_blocked}
 
 
-func _scatter_tiles(rng: RandomNumberGenerator, target: Array[Vector2i], count: int, needs_clear_space: bool) -> void:
+func _scatter_area_tiles(rng: RandomNumberGenerator, target: Array[Vector2i], count: int, needs_clear_space: bool, area_blocked: Dictionary, doors: Dictionary, npcs: Array, trees: Array[Vector2i], rocks: Array[Vector2i], flowers: Array[Vector2i], lamps: Array[Vector2i]) -> void:
 	var attempts: int = 0
 	while target.size() < count and attempts < count * 30 + 30:
 		attempts += 1
 		var tile := Vector2i(rng.randi_range(2, WORLD_COLS - 3), rng.randi_range(2, WORLD_ROWS - 3))
-		if _is_path(tile) or blocked.has(tile) or not _npc_at(tile).is_empty():
+		if _is_path_for(tile, doors) or area_blocked.has(tile) or _npc_in_list(npcs, tile):
 			continue
 		if needs_clear_space and _near_map_exit(tile):
 			continue
-		if tile in tree_tiles or tile in rock_tiles or tile in flower_tiles or tile in lamp_tiles:
+		if tile in trees or tile in rocks or tile in flowers or tile in lamps:
 			continue
 		target.append(tile)
+
+
+func _npc_in_list(npcs: Array, tile: Vector2i) -> bool:
+	for npc_value in npcs:
+		if npc_value is Dictionary and Vector2i(int(npc_value.get("x", -100)), int(npc_value.get("y", -100))) == tile:
+			return true
+	return false
+
+
+func _feature_in(features: Array, feature_name: String) -> bool:
+	return feature_name in features
+
+
+func _apply_area_cache(area: Dictionary, cache: Dictionary) -> void:
+	area_palette = str(area.get("palette", "lush")).to_lower()
+	ground_style = str(area.get("ground_style", "grass")).to_lower()
+	visual_features = area.get("visual_features", []) if area.get("visual_features") is Array else []
+	area_landmarks = area.get("landmarks", []) if area.get("landmarks") is Array else []
+	area_npcs = area.get("npcs", []) if area.get("npcs") is Array else []
+	tree_tiles.assign(cache.get("trees", []))
+	rock_tiles.assign(cache.get("rocks", []))
+	flower_tiles.assign(cache.get("flowers", []))
+	lamp_tiles.assign(cache.get("lamps", []))
+	landmark_doors = cache.get("doors", {}).duplicate(true)
+	blocked = cache.get("blocked", {}).duplicate(true)
+	if not area_npcs.is_empty() and area_npcs[0] is Dictionary:
+		npc_tile = Vector2i(int(area_npcs[0].get("x", 28)), int(area_npcs[0].get("y", 21)))
+	_update_world_theme(area)
 
 
 func _near_map_exit(tile: Vector2i) -> bool:
@@ -356,6 +437,48 @@ func _feature_enabled(feature_name: String) -> bool:
 	return feature_name in visual_features
 
 
+func _area_key(coord: Vector2i) -> String:
+	return "%d,%d" % [coord.x, coord.y]
+
+
+func _area_coord_from_world_tile(tile: Vector2i) -> Vector2i:
+	return Vector2i(floori(float(tile.x) / float(WORLD_COLS)), floori(float(tile.y) / float(WORLD_ROWS)))
+
+
+func _area_world_origin(coord: Vector2i) -> Vector2i:
+	return Vector2i(coord.x * WORLD_COLS, coord.y * WORLD_ROWS)
+
+
+func _local_tile(world_tile: Vector2i) -> Vector2i:
+	return world_tile - _area_world_origin(area_coord)
+
+
+func _load_discovered_areas() -> void:
+	var signature: String = JSON.stringify(game_state.get("world_profile", {}))
+	if signature != loaded_world_signature:
+		loaded_world_signature = signature
+		loaded_areas.clear()
+		area_render_cache.clear()
+		player_position_initialized = false
+		area_loaded = false
+	var exploration: Dictionary = game_state.get("exploration", {}) if game_state.get("exploration") is Dictionary else {}
+	var saved_areas: Dictionary = exploration.get("areas", {}) if exploration.get("areas") is Dictionary else {}
+	for area_value in saved_areas.values():
+		if not area_value is Dictionary:
+			continue
+		var saved: Dictionary = area_value
+		var coord := Vector2i(int(saved.get("x", 0)), int(saved.get("y", 0)))
+		var key: String = _area_key(coord)
+		loaded_areas[key] = saved.duplicate(true)
+		if not area_render_cache.has(key):
+			area_render_cache[key] = _build_area_cache(saved)
+	area_coord = Vector2i(int(exploration.get("current_x", 0)), int(exploration.get("current_y", 0)))
+	if not player_position_initialized:
+		player_tile = _area_world_origin(area_coord) + Vector2i(24, 23)
+		player_visual = Vector2(player_tile)
+		player_position_initialized = true
+
+
 func _apply_area_from_state() -> void:
 	var exploration: Dictionary = game_state.get("exploration", {}) if game_state.get("exploration") is Dictionary else {}
 	var saved_area: Dictionary = exploration.get("current_area", {}) if exploration.get("current_area") is Dictionary else {}
@@ -365,16 +488,17 @@ func _apply_area_from_state() -> void:
 
 func _apply_area(area: Dictionary) -> void:
 	current_area = area.duplicate(true)
+	area_coord = Vector2i(int(current_area.get("x", area_coord.x)), int(current_area.get("y", area_coord.y)))
 	area_loaded = true
-	_update_world_theme()
 	_build_world()
 	_update_header()
 	queue_redraw()
 
 
-func _update_world_theme() -> void:
-	area_palette = str(current_area.get("palette", area_palette)).to_lower()
-	ground_style = str(current_area.get("ground_style", ground_style)).to_lower()
+func _update_world_theme(area: Dictionary = {}) -> void:
+	var source: Dictionary = current_area if area.is_empty() else area
+	area_palette = str(source.get("palette", area_palette)).to_lower()
+	ground_style = str(source.get("ground_style", ground_style)).to_lower()
 	var world_text: String = JSON.stringify(game_state.get("world_profile", {})).to_lower()
 	tech_world = area_palette in ["neon", "cosmic", "urban"] or ground_style in ["metal", "pavement"]
 	if not tech_world:
@@ -394,9 +518,7 @@ func _draw() -> void:
 
 func _camera_origin() -> Vector2:
 	var target := Vector2(size.x * 0.5, size.y * 0.5) - (player_visual + Vector2(0.5, 0.5)) * TILE
-	var minimum_x: float = minf(0.0, size.x - float(WORLD_COLS) * TILE)
-	var minimum_y: float = minf(0.0, size.y - float(WORLD_ROWS) * TILE)
-	return Vector2(round(clampf(target.x, minimum_x, 0.0)), round(clampf(target.y, minimum_y, 0.0)))
+	return Vector2(round(target.x), round(target.y))
 
 
 func _world_rect(tile: Vector2i, origin: Vector2, grow: float = 0.0) -> Rect2:
@@ -404,13 +526,32 @@ func _world_rect(tile: Vector2i, origin: Vector2, grow: float = 0.0) -> Rect2:
 
 
 func _draw_overworld() -> void:
-	var origin: Vector2 = _camera_origin()
-	var start_x: int = maxi(0, int(floor(-origin.x / TILE)) - 1)
-	var start_y: int = maxi(0, int(floor(-origin.y / TILE)) - 1)
-	var end_x: int = mini(WORLD_COLS, start_x + int(ceil(size.x / TILE)) + 3)
-	var end_y: int = mini(WORLD_ROWS, start_y + int(ceil(size.y / TILE)) + 3)
-	for y in range(start_y, end_y):
-		for x in range(start_x, end_x):
+	var camera_origin: Vector2 = _camera_origin()
+	var visible_rect := Rect2(Vector2(-TILE, -TILE), size + Vector2(TILE * 2.0, TILE * 2.0))
+	for area_value in loaded_areas.values():
+		if not area_value is Dictionary:
+			continue
+		var area: Dictionary = area_value
+		var coord := Vector2i(int(area.get("x", 0)), int(area.get("y", 0)))
+		var key: String = _area_key(coord)
+		var chunk_origin: Vector2 = camera_origin + Vector2(_area_world_origin(coord)) * TILE
+		var chunk_rect := Rect2(chunk_origin, Vector2(float(WORLD_COLS) * TILE, float(WORLD_ROWS) * TILE))
+		if not chunk_rect.intersects(visible_rect):
+			continue
+		if not area_render_cache.has(key):
+			area_render_cache[key] = _build_area_cache(area)
+		var cache: Dictionary = area_render_cache[key]
+		_apply_area_cache(area, cache)
+		_draw_area_chunk(area, chunk_origin)
+	var current_key: String = _area_key(area_coord)
+	if loaded_areas.has(current_key) and area_render_cache.has(current_key):
+		_apply_area_cache(loaded_areas[current_key], area_render_cache[current_key])
+	_draw_character(Vector2i.ZERO, camera_origin, true)
+
+
+func _draw_area_chunk(_area: Dictionary, origin: Vector2) -> void:
+	for y in range(WORLD_ROWS):
+		for x in range(WORLD_COLS):
 			_draw_ground(Vector2i(x, y), origin)
 	for landmark_value in area_landmarks:
 		if not landmark_value is Dictionary:
@@ -434,7 +575,6 @@ func _draw_overworld() -> void:
 		var npc: Dictionary = npc_value
 		_draw_character(Vector2i(int(npc.get("x", 28)), int(npc.get("y", 21))), origin, false, npc_index)
 		npc_index += 1
-	_draw_character(Vector2i.ZERO, origin, true)
 
 
 func _draw_ground(tile: Vector2i, origin: Vector2) -> void:
@@ -472,6 +612,10 @@ func _draw_ground(tile: Vector2i, origin: Vector2) -> void:
 
 
 func _is_path(tile: Vector2i) -> bool:
+	return _is_path_for(tile, landmark_doors)
+
+
+func _is_path_for(tile: Vector2i, doors: Dictionary) -> bool:
 	if tile.y >= 20 and tile.y <= 22:
 		return true
 	if tile.x >= 24 and tile.x <= 26:
@@ -480,7 +624,7 @@ func _is_path(tile: Vector2i) -> bool:
 		return true
 	if tile.x >= 12 and tile.x <= 23 and tile.y >= 18 and tile.y <= 20:
 		return true
-	for door_value in landmark_doors.keys():
+	for door_value in doors.keys():
 		if not door_value is Vector2i:
 			continue
 		var door: Vector2i = door_value
@@ -666,6 +810,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not key_event.pressed or key_event.echo:
 		return
 	if mode == "explore":
+		if character_panel.visible:
+			if key_event.keycode in [KEY_ESCAPE, KEY_C]:
+				_toggle_character_panel()
+			return
 		var direction := Vector2i.ZERO
 		match key_event.keycode:
 			KEY_W, KEY_UP:
@@ -683,6 +831,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					_interact()
 			KEY_ESCAPE:
 				_hide_dialogue()
+			KEY_C:
+				_toggle_character_panel()
 		if direction != Vector2i.ZERO:
 			_hide_dialogue()
 			_move_player(direction)
@@ -697,19 +847,28 @@ func _unhandled_input(event: InputEvent) -> void:
 func _move_player(direction: Vector2i) -> void:
 	facing = direction
 	var destination: Vector2i = player_tile + direction
-	if destination.x < 0:
-		_request_world_area("west")
+	var destination_coord: Vector2i = _area_coord_from_world_tile(destination)
+	if destination_coord != area_coord:
+		pending_step_direction = direction
+		_request_world_area(_direction_name(direction))
 		return
-	if destination.x >= WORLD_COLS:
-		_request_world_area("east")
-		return
-	if destination.y < 0:
-		_request_world_area("north")
-		return
-	if destination.y >= WORLD_ROWS:
-		_request_world_area("south")
-		return
-	if _is_blocked(destination) or not _npc_at(destination).is_empty():
+	_begin_player_step(direction)
+
+
+func _direction_name(direction: Vector2i) -> String:
+	if direction.x < 0:
+		return "west"
+	if direction.x > 0:
+		return "east"
+	if direction.y < 0:
+		return "north"
+	return "south"
+
+
+func _begin_player_step(direction: Vector2i) -> void:
+	var destination: Vector2i = player_tile + direction
+	var local_destination: Vector2i = _local_tile(destination)
+	if _is_blocked(local_destination) or not _npc_at(local_destination).is_empty():
 		queue_redraw()
 		return
 	player_tile = destination
@@ -741,7 +900,8 @@ func _npc_at(tile: Vector2i) -> Dictionary:
 
 
 func _nearby_npc() -> Dictionary:
-	var front_npc: Dictionary = _npc_at(player_tile + facing)
+	var local_player: Vector2i = _local_tile(player_tile)
+	var front_npc: Dictionary = _npc_at(local_player + facing)
 	if not front_npc.is_empty():
 		return front_npc
 	for npc_value in area_npcs:
@@ -749,7 +909,7 @@ func _nearby_npc() -> Dictionary:
 			continue
 		var npc: Dictionary = npc_value
 		var tile := Vector2i(int(npc.get("x", -100)), int(npc.get("y", -100)))
-		if _tile_distance(player_tile, tile) <= 1:
+		if _tile_distance(local_player, tile) <= 1:
 			return npc
 	return {}
 
@@ -758,13 +918,14 @@ func _request_world_area(direction: String) -> void:
 	if busy:
 		return
 	pending_exit_direction = direction
-	_post("/world/area/generate", {"direction": direction}, "world_area")
+	_post("/world/area/generate", {"direction": direction}, "world_area", false)
 
 
 func _interact() -> void:
 	if busy:
 		return
-	var front: Vector2i = player_tile + facing
+	var local_player: Vector2i = _local_tile(player_tile)
+	var front: Vector2i = local_player + facing
 	var npc: Dictionary = _nearby_npc()
 	if not npc.is_empty():
 		var npc_name: String = str(npc.get("name", "the nearby person"))
@@ -947,7 +1108,7 @@ func _can_act() -> bool:
 	return true
 
 
-func _post(path: String, body: Dictionary, next_request_mode: String) -> void:
+func _post(path: String, body: Dictionary, next_request_mode: String, show_thinking: bool = true) -> void:
 	if busy:
 		return
 	busy = true
@@ -955,13 +1116,27 @@ func _post(path: String, body: Dictionary, next_request_mode: String) -> void:
 	action_mode = ""
 	chosen_ability.clear()
 	_set_buttons_disabled(true)
-	_set_message("Thinking...")
+	if show_thinking:
+		_set_message("Thinking...")
+	else:
+		hint_label.text = "GENERATING THE NEXT AREA..."
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var error: int = http.request(API_BASE + path, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
 	if error != OK:
 		busy = false
 		_set_buttons_disabled(false)
-		_set_message("Could not reach the local game server. Make sure python -m backend.api is running.")
+		_request_failed("Could not reach the local game server. Make sure python -m backend.api is running.")
+
+
+func _request_failed(message: String) -> void:
+	if request_mode == "world_area":
+		pending_step_direction = Vector2i.ZERO
+		pending_exit_direction = ""
+		_update_header()
+		hint_label.text = "AREA GENERATION FAILED — TRY THE EDGE AGAIN"
+		request_mode = ""
+		return
+	_set_message(message)
 
 
 func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -969,29 +1144,31 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	_set_buttons_disabled(false)
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not parsed is Dictionary:
-		_set_message("The game server returned an unreadable response.")
+		_request_failed("The game server returned an unreadable response.")
 		return
 	var payload: Dictionary = parsed
 	if response_code < 200 or response_code >= 300 or not bool(payload.get("ok", true)):
-		_set_message(str(payload.get("error", "The action could not be completed.")))
+		_request_failed(str(payload.get("error", "The action could not be completed.")))
 		return
 	if payload.get("state") is Dictionary:
 		game_state = payload.get("state", {})
-	if request_mode == "world_area" and payload.get("area") is Dictionary:
+	if request_mode == "world_area":
+		if not payload.get("area") is Dictionary:
+			_request_failed("The generated area was missing from the server response.")
+			return
 		_apply_area(payload.get("area", {}))
-		match str(payload.get("entry_direction", pending_exit_direction)):
-			"east":
-				player_tile = Vector2i(1, 21)
-			"west":
-				player_tile = Vector2i(WORLD_COLS - 2, 21)
-			"north":
-				player_tile = Vector2i(int(WORLD_COLS / 2), WORLD_ROWS - 2)
-			"south":
-				player_tile = Vector2i(int(WORLD_COLS / 2), 1)
-			_:
-				player_tile = Vector2i(int(WORLD_COLS / 2), 23)
-		player_visual = Vector2(player_tile)
 		pending_exit_direction = ""
+		_update_main_controller(payload)
+		_refresh_character_sheet()
+		_update_header()
+		_hide_dialogue()
+		var crossing_step: Vector2i = pending_step_direction
+		pending_step_direction = Vector2i.ZERO
+		request_mode = ""
+		if crossing_step != Vector2i.ZERO:
+			_begin_player_step(crossing_step)
+		queue_redraw()
+		return
 	var combat: Dictionary = _combat()
 	var was_battle: bool = mode == "battle" or request_mode in ["battle_start", "combat"]
 	if bool(combat.get("active", false)):
@@ -1000,6 +1177,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 		mode = "explore"
 	_update_world_theme()
 	_update_main_controller(payload)
+	_refresh_character_sheet()
 	_update_header()
 	_refresh_mode_interface()
 	var narration: String = str(payload.get("narration", "")).strip_edges()
@@ -1040,7 +1218,107 @@ func _update_header() -> void:
 		if not links.is_empty() and links[0] is Dictionary:
 			var first_link: Dictionary = links[0]
 			subtitle_label.text += "  •  %s travel nearby (coming later)" % str(first_link.get("mode", "Transport")).capitalize()
-		hint_label.text = "MOVE  WASD / ARROWS     INTERACT  E / SPACE"
+		hint_label.text = "MOVE  WASD / ARROWS     INTERACT  E / SPACE     CHARACTER  C"
+
+
+func _toggle_character_panel() -> void:
+	character_panel.visible = not character_panel.visible
+	character_button.text = "CLOSE SHEET" if character_panel.visible else "CHARACTER"
+	if character_panel.visible:
+		_refresh_character_sheet()
+
+
+func _refresh_character_sheet() -> void:
+	if character_text == null:
+		return
+	var player: Dictionary = game_state.get("player", {}) if game_state.get("player") is Dictionary else {}
+	var stats: Dictionary = player.get("stats", {}) if player.get("stats") is Dictionary else {}
+	var lines: Array[String] = []
+	lines.append("[font_size=24][b]%s[/b][/font_size]" % _sheet_safe(str(player.get("name", "Traveler"))))
+	lines.append("%s  •  Level %d" % [_sheet_safe(str(player.get("class", "Unassigned"))), int(player.get("level", 1))])
+	lines.append("")
+	lines.append("[b]VITALS[/b]")
+	lines.append("HP  %d / %d" % [int(player.get("hp", 0)), int(player.get("max_hp", 0))])
+	lines.append("Armor  %d / %d  •  Weight %d" % [int(player.get("armor", 0)), int(player.get("max_armor", 0)), int(player.get("armor_weight", 0))])
+	lines.append("%s  %d / %d" % [_sheet_safe(str(player.get("resource_name", "Resource"))), int(player.get("resource", player.get("mana", 0))), int(player.get("max_resource", player.get("max_mana", 0)))])
+	lines.append("AC %d  •  Movement %d  •  Initiative %d" % [int(player.get("armor_class", 10)), int(player.get("movement", 0)), int(player.get("initiative_bonus", 0))])
+	lines.append("XP %d / %d  •  SP %d  •  AP %d" % [int(player.get("xp_orbs", 0)), int(player.get("xp_to_next_level", 0)), int(player.get("skill_points_unspent", 0)), int(player.get("ability_points", 0))])
+	lines.append("Money  " + _sheet_money(player))
+	lines.append("")
+	lines.append("[b]CORE STATS[/b]")
+	var stat_names: Array[String] = ["health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"]
+	for index in range(0, stat_names.size(), 2):
+		var left_name: String = stat_names[index]
+		var stat_line: String = "%s %d" % [left_name.capitalize(), int(stats.get(left_name, 0))]
+		if index + 1 < stat_names.size():
+			var right_name: String = stat_names[index + 1]
+			stat_line += "     %s %d" % [right_name.capitalize(), int(stats.get(right_name, 0))]
+		lines.append(stat_line)
+	lines.append("")
+	lines.append("[b]EQUIPMENT & ARMOR[/b]")
+	var weapon = player.get("equipped_weapon", {})
+	if weapon is Dictionary and not weapon.is_empty():
+		lines.append("Weapon: " + _sheet_safe(str(weapon.get("name", "Equipped weapon"))))
+	elif not str(weapon).strip_edges().is_empty() and str(weapon) != "{}":
+		lines.append("Weapon: " + _sheet_safe(str(weapon)))
+	else:
+		lines.append("Weapon: None equipped")
+	var armor_name: String = str(player.get("armor_set_name", "Mixed set"))
+	lines.append("Armor set: " + _sheet_safe(armor_name))
+	var equipped_armor: Dictionary = player.get("equipped_armor", {}) if player.get("equipped_armor") is Dictionary else {}
+	for slot in ["helmet", "breastplate", "pants", "gloves", "boots"]:
+		var piece: Dictionary = equipped_armor.get(slot, {}) if equipped_armor.get(slot) is Dictionary else {}
+		if piece.is_empty():
+			continue
+		lines.append("• %s: %s — %d/%d Armor, Weight %d" % [str(slot).capitalize(), _sheet_safe(str(piece.get("name", slot))), int(piece.get("armor_hp", 0)), int(piece.get("max_armor_hp", piece.get("armor_hp", 0))), int(piece.get("weight", 0))])
+	lines.append("")
+	lines.append("[b]EQUIPPED ABILITIES[/b]")
+	var abilities: Array = player.get("equipped_abilities", []) if player.get("equipped_abilities") is Array else []
+	if abilities.is_empty():
+		lines.append("None equipped")
+	else:
+		for ability_value in abilities:
+			if ability_value is Dictionary:
+				lines.append("• %s — Cost %d" % [_sheet_safe(str(ability_value.get("name", "Ability"))), int(ability_value.get("resource_cost", 0))])
+	lines.append("")
+	lines.append("[b]INVENTORY[/b]")
+	var inventory: Array = player.get("inventory", []) if player.get("inventory") is Array else []
+	if inventory.is_empty():
+		lines.append("Inventory is empty.")
+	else:
+		for item_value in inventory:
+			if not item_value is Dictionary:
+				continue
+			var item: Dictionary = item_value
+			var quantity: int = maxi(1, int(item.get("quantity", 1)))
+			var rarity: String = str(item.get("rarity", "common")).capitalize()
+			var quantity_text: String = " x%d" % quantity if quantity > 1 else ""
+			lines.append("• %s%s  [%s]" % [_sheet_safe(str(item.get("name", "Item"))), quantity_text, rarity])
+	character_text.text = "\n".join(lines)
+
+
+func _sheet_safe(value: String) -> String:
+	return value.replace("[", "(").replace("]", ")")
+
+
+func _sheet_money(player: Dictionary) -> String:
+	var wallet: Dictionary = player.get("wallet", {}) if player.get("wallet") is Dictionary else {}
+	if not wallet.is_empty():
+		var amount: int = int(wallet.get("amount", 0))
+		var symbol: String = str(wallet.get("symbol", ""))
+		var currency_name: String = str(wallet.get("name", "currency"))
+		if not symbol.is_empty() and bool(wallet.get("prefix", false)):
+			return "%s%d" % [symbol, amount]
+		if not symbol.is_empty():
+			return "%d%s" % [amount, symbol]
+		return "%d %s" % [amount, _sheet_safe(currency_name)]
+	var currency: Dictionary = player.get("currency", {}) if player.get("currency") is Dictionary else {}
+	var parts: Array[String] = []
+	for key in currency.keys():
+		var coin_amount: int = int(currency.get(key, 0))
+		if coin_amount > 0:
+			parts.append("%d %s" % [coin_amount, str(key)])
+	return ", ".join(parts) if not parts.is_empty() else "0"
 
 
 func _refresh_mode_interface() -> void:
