@@ -35,10 +35,14 @@ var action_input: LineEdit
 var send_button: Button
 var context_title: Label
 var context_text: RichTextLabel
+var world_view: Control
 
 
 func _ready() -> void:
 	_build_ui()
+	world_view = get_node_or_null("WorldView")
+	if world_view != null:
+		world_view.call("bind_main", self)
 	http = HTTPRequest.new()
 	add_child(http)
 	http.request_completed.connect(_on_request_completed)
@@ -372,6 +376,9 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_refresh_story()
 	_set_suggestions(payload.get("suggested_actions", []))
 	_show_context("player")
+	var player_state: Dictionary = latest_state.get("player", {}) if latest_state.get("player") is Dictionary else {}
+	if bool(player_state.get("character_creation_complete", false)):
+		_enter_world_mode(payload)
 
 
 func _set_connection_error(message: String) -> void:
@@ -531,3 +538,17 @@ func _player_details(player: Dictionary) -> String:
 	for stat in ["health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"]:
 		lines.append("%s: %d" % [stat.capitalize(), int(stats.get(stat, 0))])
 	return "\n".join(lines)
+
+
+func _enter_world_mode(payload: Dictionary = {}) -> void:
+	if world_view == null:
+		return
+	var world_payload: Dictionary = payload
+	if world_payload.is_empty():
+		world_payload = {"state": latest_state}
+	world_view.call("show_from_payload", world_payload)
+
+
+func _leave_world_mode() -> void:
+	if world_view != null:
+		world_view.call("hide_view")
