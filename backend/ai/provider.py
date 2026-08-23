@@ -4,6 +4,8 @@ import json
 import os
 from typing import Dict, Protocol
 
+from backend.game.loot import finalize_loot_result
+
 
 LOOT_RULES = """
 
@@ -16,16 +18,17 @@ LOOT / SEARCH / REWARD RULES
 - Before offering or resolving another search/loot action, check game_state.world_flags.loot_sources. If that source is already searched, do not regenerate its hidden contents or pretend it is fresh. If it was already looted, there is no duplicate loot unless the story explicitly establishes a new deposit later.
 - If an already-searched source had unretrieved visible items, those same established items may still be taken; do not reroll or replace them with different loot.
 - When the player successfully TAKES an item, use add_inventory_item in the same response. Narration alone never puts an item in inventory.
-- Every generated item must have: name, type, description, quantity, rarity, and sell_value. rarity must be exactly Common, Uncommon, Rare, Epic, or Legendary.
-- Rarity measures how exceptional the item is, not merely how flashy its name sounds. Common should dominate ordinary loot; Uncommon appears sometimes; Rare is genuinely notable; Epic is very scarce; Legendary should be story/boss/endgame-level and never routine.
-- Loot power must scale with player level, source difficulty, location danger, quest significance, and enemy importance. Early ordinary enemies should mostly drop Common gear/materials and modest consumables. Do not hand out major upgrades constantly.
-- Stronger rarity does not bypass normal mechanics: weapons still use damage dice/range/attack_attribute; shields use Shield HP; armor is one of helmet/breastplate/pants/gloves/boots and uses Armor HP/weight/optional small stat_bonus; consumables have exact effects.
+- Every generated item must have: name, type, description, quantity, sell_value, and loot_tier.
+- loot_tier must be exactly one of: routine, dangerous, elite, boss, mythic. Choose it from the SOURCE, not from the item you want to create: ordinary bodies/plants/containers=routine; notably dangerous locations or foes=dangerous; elite/champion/miniboss sources=elite; real bosses or major quest caches=boss; final-boss/endgame/mythic sources=mythic.
+- DO NOT choose item rarity yourself. Python rolls Common/Uncommon/Rare/Epic/Legendary from hard probability tables and then scales the item's real mechanics. You may write a neutral discovery description; if you include a provisional rarity label, Python may replace it.
+- Rarity and mechanical power are Python-authoritative. Legendary gear is both much rarer and mechanically much stronger than Common gear.
+- Generate the BASE/Common-stage mechanics appropriate for the player's current level and source. Python upgrades damage dice, Shield HP, Armor HP, healing, stat-bonus caps, and value after the rarity roll.
 - Whole armor sets may occasionally be rewards, caches, boss loot, or special finds, but ordinary drops should usually be individual pieces.
-- Equipment must remain balanced for the current stage of progression. A low-level Legendary story object can exist, but if it is combat gear its usable numbers must not trivialize the game unless the story intentionally grants an exceptional endgame-level reward.
+- Equipment must remain balanced for the current stage of progression before rarity scaling. Do not pre-buff an item because you hope it becomes Rare/Epic/Legendary.
 - Currency or valuables can also be found when appropriate to the world, but never assume gold. Use the world's economy/currency (credits, dollars, gold, caps, crowns, etc.).
-- When loot is discovered, clearly state what was found and the important mechanics. Example format: `Found: Compact Blaster [Common] — Damage 1d6 | Range 6 | Sell Value 9 credits.` Keep the wording natural to the world.
+- When loot is discovered, clearly state what was found and the important BASE mechanics. Keep the wording natural to the world.
 - Harvested materials should normally be materials/ingredients rather than magically becoming finished gear. Animals should drop plausible materials, food, trophies, or carried objects—not random swords or coins unless there is a story reason.
-- Quest rewards and boss drops may be better than random exploration loot, but still follow progression balance and rarity rules.
+- Quest rewards and boss drops may use higher loot_tier values, but only when the source genuinely deserves them.
 """
 
 
@@ -109,10 +112,9 @@ INVENTORY / ITEM RULES
 - The persistent player inventory is authoritative. Do not narrate that an item was picked up, looted, harvested, received, purchased, or otherwise taken into the player's possession without also adding it to inventory.
 - Whenever the player SUCCESSFULLY takes or receives a physical item, include a state_changes entry exactly like {\"type\":\"add_inventory_item\",\"item\":{...}}.
 - This applies to ordinary objects too: flowers, keys, notes, materials, food, tools, quest items, weapons, shields, armor pieces, relics, and loot.
-- The item object must include at least name, type, description, quantity, rarity, and sell_value. sell_value is a nonnegative integer representing its normal resale value; use 0 for truly unsellable quest/story objects.
-- rarity must be one of Common, Uncommon, Rare, Epic, Legendary.
-- Keep sell values modest and appropriate to the confirmed world's economy and the item's usefulness/rarity. Do not make ordinary flowers, scraps, or common supplies valuable.
-- Weapons must retain exact damage dice/range/attack_attribute. Shields retain Shield HP. Armor pieces retain slot/Armor HP/max Armor HP/weight/stat_bonus. Consumables retain exact mechanics.
+- The item object must include at least name, type, description, quantity, sell_value, and loot_tier. Python supplies authoritative rarity.
+- Keep base sell values modest and appropriate to the confirmed world's economy and the item's usefulness. Python applies the rarity multiplier after rolling.
+- Weapons must retain exact base damage dice/range/attack_attribute. Shields retain base Shield HP. Armor pieces retain slot/base Armor HP/max Armor HP/weight/stat_bonus. Consumables retain exact base mechanics. Python then scales the relevant numbers by rarity.
 - Do not add an item merely because the player sees, examines, or talks about it. Add it only when possession actually changes.
 
 ARMOR RULES
@@ -213,6 +215,7 @@ When requires_roll=true, roll contains reason, difficulty, skill, and attribute 
                 text = str(item).strip()
                 if text: normalized.append({"text": text, "requires_roll": False, "skill": None})
         result["suggested_actions"] = normalized
+        finalize_loot_result(result, context)
         result["debug"] = {"provider": "openai", "model": self.model, "rules_found": len(context.get("relevant_rules", [])), "memories_found": len(context.get("relevant_memories", []))}
         return result
 
