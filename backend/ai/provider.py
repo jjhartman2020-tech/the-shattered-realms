@@ -34,6 +34,47 @@ LOOT / SEARCH / REWARD RULES
 """
 
 
+def _parse_json_object(raw: str) -> Dict | None:
+    """Accept valid JSON plus common model wrappers without exposing raw JSON to the player."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    candidates = [text]
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        closing_fence = text.rfind("```")
+        if first_newline >= 0 and closing_fence > first_newline:
+            candidates.append(text[first_newline + 1:closing_fence].strip())
+    if text.startswith('"narration"'):
+        candidates.append("{" + text + "}")
+
+    decoder = json.JSONDecoder(strict=False)
+    seen = set()
+    while candidates:
+        candidate = candidates.pop(0)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            decoded = decoder.decode(candidate)
+            if isinstance(decoded, dict):
+                return decoded
+            if isinstance(decoded, str):
+                candidates.append(decoded.strip())
+        except (json.JSONDecodeError, TypeError):
+            pass
+        for index, character in enumerate(candidate):
+            if character != "{":
+                continue
+            try:
+                decoded, _end = decoder.raw_decode(candidate[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict) and "narration" in decoded:
+                return decoded
+    return None
+
+
 class AIProvider(Protocol):
     def respond(self, context: Dict) -> Dict:
         ...
@@ -77,6 +118,8 @@ GAME MASTER / STORY CONTROL
 - Keep player agency sacred: never decide the player's important choices, dialogue, feelings, beliefs, or voluntary actions for them.
 - Stop for player input at meaningful decision points.
 - Questions should normally be decision prompts such as 'What do you do?' rather than requests for the player to create story facts.
+- Keep player.location current. Whenever the player enters, leaves, or clearly changes places, include {"type":"set_location","location":"specific current place"} in state_changes.
+- Never leave location as "unknown" after establishing where the scene takes place. Opening scenes must establish and save a specific location.
 - Return exactly 3 concise suggested actions that make sense RIGHT NOW. They are suggestions only; the player may type anything else.
 - For EACH suggested action, also predict whether that exact action would normally require a non-combat check if attempted immediately.
 - If a suggested action requires a roll, the preview MUST name only the governing CORE STAT, never a skill/subskill.
@@ -84,6 +127,12 @@ GAME MASTER / STORY CONTROL
 - Examples: Engineering -> intelligence; Investigation -> intelligence; Athletics -> strength; Acrobatics -> agility; Stealth -> agility; aiming/precision -> dexterity; Perception/Insight/Survival/Medicine -> wisdom; Persuasion/Deception/Intimidation -> charisma; spellcasting/channeling -> magic.
 - Store that core-stat preview in the suggested action's `skill` field for compatibility with the current terminal UI. Do NOT put words like Engineering, Athletics, Acrobatics, Stealth, Investigation, or Persuasion there.
 - This suggestion metadata is a preview, not a guaranteed outcome. Circumstances may change and Python/the later action-resolution pass remains authoritative.
+
+SESSION RESUME
+- If context.resume_scene is true, recap the exact current situation without advancing time, moving the player, resolving an action, or inventing a new event.
+- Begin by plainly stating where the player currently is and what is immediately happening there.
+- Use the latest confirmed memory to recover the location if saved player.location is unknown. When the recent memory clearly names it, emit set_location so Python can repair the save.
+- Still return exactly 3 immediate, meaningfully different choices. The player may type anything instead.
 
 NARRATION STYLE / CLARITY
 - Gameplay narration must be quick and easy to understand. Clarity matters more than fancy writing.
@@ -179,12 +228,28 @@ Return ONLY valid JSON with this top-level shape:
 When requires_roll=true, roll contains reason, difficulty, skill, and attribute when known. Never reveal private chain-of-thought.
 """
         system_instructions += LOOT_RULES
-        response = self.client.responses.create(model=self.model, instructions=system_instructions, input=serialize_context(context))
+        response = self.client.responses.create(
+            model=self.model,
+            instructions=system_instructions,
+            input=serialize_context(context),
+            text={"format": {"type": "json_object"}},
+        )
         raw = response.output_text.strip()
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = {"narration": raw or "The world hesitates for a moment.", "player_action": context.get("player_action", ""), "requires_roll": False, "roll": None, "combat_request": None, "state_changes": [], "memories": [], "world_notes": [], "suggested_actions": []}
+        result = _parse_json_object(raw)
+        if result is None:
+            result = {
+                "narration": "The Game Master response could not be read. Please try that action again.",
+                "player_action": context.get("player_action", ""), "requires_roll": False,
+                "roll": None, "combat_request": None, "state_changes": [], "memories": [], "world_notes": [],
+                "suggested_actions": [
+                    {"text": "Look around and review the current situation.", "requires_roll": False, "skill": None},
+                    {"text": "Continue toward the clearest nearby path.", "requires_roll": False, "skill": None},
+                    {"text": "Check your surroundings for someone to speak with.", "requires_roll": False, "skill": None},
+                ],
+            }
+        nested = _parse_json_object(str(result.get("narration") or ""))
+        if nested is not None and any(key in nested for key in ("state_changes", "suggested_actions", "player_action")):
+            result = nested
         result.setdefault("narration", "The world waits...")
         result.setdefault("player_action", context.get("player_action", ""))
         result.setdefault("requires_roll", False)
