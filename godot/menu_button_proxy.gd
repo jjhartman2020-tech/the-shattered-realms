@@ -40,7 +40,9 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if overlay == null:
 		overlay = get_parent().get_node_or_null("MenuOverlay")
-	visible = overlay == null or not overlay.visible
+	var creator = get_parent().get_node_or_null("CharacterCreation")
+	var creator_is_open := creator != null and creator.visible
+	visible = (overlay == null or not overlay.visible) and not creator_is_open
 
 
 func _input(event: InputEvent) -> void:
@@ -52,6 +54,9 @@ func _input(event: InputEvent) -> void:
 			_open_menu()
 			get_viewport().set_input_as_handled()
 	elif event is InputEventKey:
+		var focused_control := get_viewport().gui_get_focus_owner()
+		if focused_control is LineEdit or focused_control is TextEdit:
+			return
 		var key_event := event as InputEventKey
 		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_M:
 			_open_menu()
