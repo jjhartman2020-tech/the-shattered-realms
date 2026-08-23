@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
+import hashlib
+import json
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from .armor import ARMOR_SLOTS, effective_movement, normalize_armor_piece, sync_armor_summary
 from .attributes import ATTRIBUTE_NAMES, NATURAL_ATTRIBUTE_CAP
@@ -155,22 +157,156 @@ def cached_character_portrait(output_path: Path) -> str:
     return ""
 
 
+def _portrait_metadata_path(output_path: Path) -> Path:
+    return output_path.with_suffix(".json")
+
+
+def _portrait_cache_dir(output_path: Path) -> Path:
+    return output_path.parent / f"{output_path.stem}_outfits"
+
+
+def _portrait_manifest(game_master) -> Dict[str, Any]:
+    """Describe the identity and visible loadout without volatile durability values."""
+    player = _player(game_master)
+    world = game_master.state.data.get("world_profile")
+    if not isinstance(world, dict):
+        world = game_master.state.data.get("world") if isinstance(game_master.state.data.get("world"), dict) else {}
+    equipped = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}
+    armor: Dict[str, Any] = {}
+    for slot in ARMOR_SLOTS:
+        piece = equipped.get(slot)
+        if not isinstance(piece, dict):
+            armor[slot] = None
+            continue
+        armor[slot] = {
+            "name": str(piece.get("name") or "Armor"),
+            "description": str(piece.get("description") or ""),
+            "rarity": str(piece.get("rarity") or "common"),
+        }
+    return {
+        "character": {
+            "name": str(player.get("name") or "Traveler"),
+            "species": str(player.get("species") or "unspecified"),
+            "class": str(player.get("class") or "unassigned"),
+            "appearance": str(player.get("appearance") or ""),
+        },
+        "world": {
+            "name": str(world.get("name") or world.get("title") or "The Shattered Realms"),
+            "genre": str(world.get("genre") or world.get("setting") or "adaptive fantasy and science fiction"),
+            "description": str(world.get("description") or world.get("summary") or world.get("tone") or ""),
+        },
+        "armor": armor,
+    }
+
+
+def _portrait_signature(manifest: Dict[str, Any]) -> str:
+    canonical = json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _read_portrait_metadata(output_path: Path) -> Dict[str, Any]:
+    try:
+        parsed = json.loads(_portrait_metadata_path(output_path).read_text(encoding="utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _write_portrait_files(output_path: Path, image_bytes: bytes, manifest: Dict[str, Any], signature: str) -> None:
+    """Atomically activate the image and save an exact reusable copy for this outfit."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path = _portrait_cache_dir(output_path) / f"{signature}.png"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {"signature": signature, "manifest": manifest}
+
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    temporary.write_bytes(image_bytes)
+    temporary.replace(output_path)
+    cache_temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    cache_temporary.write_bytes(image_bytes)
+    cache_temporary.replace(cache_path)
+    metadata_path = _portrait_metadata_path(output_path)
+    metadata_temporary = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+    metadata_temporary.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata_temporary.replace(metadata_path)
+
+
+def load_character_portrait(game_master, output_path: Path) -> Dict[str, Any]:
+    """Restore an exact cached outfit, or return the current picture marked stale."""
+    manifest = _portrait_manifest(game_master)
+    signature = _portrait_signature(manifest)
+    cache_path = _portrait_cache_dir(output_path) / f"{signature}.png"
+    active_metadata = _read_portrait_metadata(output_path)
+
+    try:
+        if cache_path.is_file():
+            image_bytes = cache_path.read_bytes()
+            _write_portrait_files(output_path, image_bytes, manifest, signature)
+            return {
+                "portrait_base64": base64.b64encode(image_bytes).decode("ascii"),
+                "portrait_available": True,
+                "portrait_stale": False,
+                "portrait_cached": True,
+            }
+        encoded = cached_character_portrait(output_path)
+        exact_active = bool(encoded) and str(active_metadata.get("signature") or "") == signature
+        if exact_active:
+            image_bytes = base64.b64decode(encoded)
+            _write_portrait_files(output_path, image_bytes, manifest, signature)
+        return {
+            "portrait_base64": encoded,
+            "portrait_available": bool(encoded),
+            "portrait_stale": not exact_active,
+            "portrait_cached": False,
+        }
+    except (OSError, ValueError, TypeError):
+        encoded = cached_character_portrait(output_path)
+        return {
+            "portrait_base64": encoded,
+            "portrait_available": bool(encoded),
+            "portrait_stale": True,
+            "portrait_cached": False,
+        }
+
+
+def clear_character_portrait_cache(output_path: Path) -> None:
+    """Remove portraits belonging to a deliberately reset campaign."""
+    for path in (output_path, _portrait_metadata_path(output_path)):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    cache_dir = _portrait_cache_dir(output_path)
+    try:
+        for cached_file in cache_dir.glob("*"):
+            if cached_file.is_file():
+                cached_file.unlink(missing_ok=True)
+        cache_dir.rmdir()
+    except OSError:
+        pass
+
+
 def generate_character_portrait(
     game_master,
     output_path: Path,
     *,
-    changed_slot: str = "",
-    change_type: str = "",
+    force_refresh: bool = False,
 ) -> str:
-    """Generate or edit cached full-body art from authoritative equipped armor."""
+    """Generate one outfit preview, reusing exact cached loadouts when possible."""
     player = _player(game_master)
     client = getattr(game_master.provider, "client", None)
     if client is None or not hasattr(client, "images"):
         raise ValueError("Character art needs OPENAI_API_KEY. Set it, then restart python -m backend.api.")
 
-    world = game_master.state.data.get("world_profile")
-    if not isinstance(world, dict):
-        world = game_master.state.data.get("world") if isinstance(game_master.state.data.get("world"), dict) else {}
+    manifest = _portrait_manifest(game_master)
+    signature = _portrait_signature(manifest)
+    cache_path = _portrait_cache_dir(output_path) / f"{signature}.png"
+    if cache_path.is_file() and not force_refresh:
+        image_bytes = cache_path.read_bytes()
+        _write_portrait_files(output_path, image_bytes, manifest, signature)
+        return base64.b64encode(image_bytes).decode("ascii")
+
+    world = manifest["world"]
     equipped = player.get("equipped_armor") if isinstance(player.get("equipped_armor"), dict) else {}
     armor_details = []
     for slot in ARMOR_SLOTS:
@@ -185,22 +321,19 @@ def generate_character_portrait(
                 f"{slot.upper()}: EMPTY — show normal clothing/body at this slot and remove any armor piece previously shown there"
             )
 
-    change_instruction = ""
-    normalized_slot = str(changed_slot or "").strip().lower()
-    normalized_change = str(change_type or "").strip().lower()
-    if normalized_slot in ARMOR_SLOTS:
-        if normalized_change == "unequip":
-            change_instruction = (
-                f"IMPORTANT CURRENT EDIT: the {normalized_slot} was just UNEQUIPPED. Completely remove the old "
-                f"{normalized_slot} armor while leaving the character's identity and unrelated slots unchanged."
-            )
-        elif normalized_change == "equip":
-            current_piece = equipped.get(normalized_slot, {})
-            change_instruction = (
-                f"IMPORTANT CURRENT EDIT: the {normalized_slot} was just changed to "
-                f"'{current_piece.get('name', 'the newly equipped item')}'. Completely replace the previous "
-                f"{normalized_slot} design with this new item's visibly different silhouette, materials, colors, and details."
-            )
+    previous_metadata = _read_portrait_metadata(output_path)
+    previous_manifest = previous_metadata.get("manifest") if isinstance(previous_metadata.get("manifest"), dict) else {}
+    previous_armor = previous_manifest.get("armor") if isinstance(previous_manifest.get("armor"), dict) else {}
+    changed_slots = [slot for slot in ARMOR_SLOTS if previous_armor.get(slot) != manifest["armor"].get(slot)]
+    if previous_manifest:
+        changed_text = ", ".join(slot.upper() for slot in changed_slots) if changed_slots else "none"
+        change_instruction = (
+            f"CURRENT EDIT: Only these slots changed: {changed_text}. Preserve every unchanged armor piece exactly as "
+            "it appears in the supplied portrait—same silhouette, colors, materials, and small details. Completely "
+            "remove armor from changed slots marked EMPTY and replace changed equipped slots with their exact named design."
+        )
+    else:
+        change_instruction = "Apply the complete authoritative loadout while preserving the character's identity."
 
     prompt = f"""Create original full-body character concept art for a text RPG character screen.
 Show one fully clothed character, head to toe, in a neutral readable pose on a simple atmospheric background. No text, labels, UI, logos, gore, or sexualized presentation. Keep the design suitable for a teen-rated adventure game. If the description names an existing copyrighted character, reinterpret the idea into a clearly original design rather than copying that character.
@@ -209,8 +342,8 @@ Character name: {player.get('name', 'Traveler')}
 Species: {player.get('species', 'unspecified')}
 Class/build: {player.get('class', 'unassigned')}
 Saved appearance: {player.get('appearance', 'Use a distinctive original adventurer design.')}
-World name/genre: {world.get('name', world.get('title', 'The Shattered Realms'))} / {world.get('genre', world.get('setting', 'adaptive fantasy and science fiction'))}
-World visual direction: {world.get('description', world.get('summary', world.get('tone', 'Match the established game world.')))}
+World name/genre: {world.get('name', 'The Shattered Realms')} / {world.get('genre', 'adaptive fantasy and science fiction')}
+World visual direction: {world.get('description', 'Match the established game world.')}
 AUTHORITATIVE ARMOR SLOTS (follow every slot exactly):
 {chr(10).join(armor_details)}
 {change_instruction}
@@ -221,7 +354,8 @@ Use polished, detailed, colorful digital illustration with a strong readable sil
     quality = os.getenv("OPENAI_IMAGE_QUALITY", "medium").strip().lower()
     if quality not in {"low", "medium", "high", "auto"}:
         quality = "medium"
-    if output_path.is_file():
+    same_identity = previous_manifest and previous_manifest.get("character") == manifest.get("character") and previous_manifest.get("world") == manifest.get("world")
+    if output_path.is_file() and (same_identity or not previous_manifest):
         with output_path.open("rb") as source_image:
             result = client.images.edit(
                 model=model,
@@ -253,8 +387,5 @@ Use polished, detailed, colorful digital illustration with a strong readable sil
     if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("The image service returned an unsupported image format.")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-    temporary.write_bytes(image_bytes)
-    temporary.replace(output_path)
+    _write_portrait_files(output_path, image_bytes, manifest, signature)
     return encoded
