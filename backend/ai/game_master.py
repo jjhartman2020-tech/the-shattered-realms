@@ -1,6 +1,7 @@
 """AI-first Game Master runtime for The Shattered Realms."""
 
 from copy import deepcopy
+import re
 from typing import Dict, List
 
 from .context import ContextBuilder
@@ -22,12 +23,16 @@ from backend.game.world import WorldSimulator
 
 SKILL_ALIASES = {
     "acrobatics": "acrobatics", "animal handling": "animal_handling", "arcana": "arcana",
-    "athletics": "athletics", "strength": "athletics", "stealth": "stealth", "sneak": "stealth",
+    "athletics": "athletics", "strength": "athletics", "grappling": "grappling", "might": "might",
+    "stealth": "stealth", "sneak": "stealth", "evasion": "evasion",
     "sleight of hand": "sleight_of_hand", "sleight_of_hand": "sleight_of_hand", "pickpocket": "sleight_of_hand",
-    "perception": "perception", "investigation": "investigation", "survival": "survival",
+    "pickpocketing": "pickpocketing", "lockpicking": "lockpicking", "precision": "precision",
+    "perception": "perception", "investigation": "investigation", "engineering": "engineering",
+    "survival": "survival", "endurance": "endurance", "fortitude": "fortitude",
     "persuasion": "persuasion", "persuade": "persuasion", "deception": "deception", "deceive": "deception",
     "intimidation": "intimidation", "intimidate": "intimidation", "insight": "insight", "medicine": "medicine",
-    "nature": "nature", "performance": "performance", "religion": "religion", "history": "history",
+    "nature": "nature", "performance": "performance", "leadership": "leadership", "history": "history",
+    "spellcasting": "spellcasting", "channeling": "channeling",
 }
 ATTRIBUTE_ALIASES = {k: k for k in ("health", "mana", "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense")}
 ATTRIBUTE_ALIASES.update({"agility": "dexterity", "durability": "constitution"})
@@ -41,6 +46,41 @@ ATTRIBUTE_REASON_HINTS = {
     "speed": ("sprint", "race", "outrun", "react quickly", "catch up"),
     "defense": ("defend", "guard", "brace", "block", "protect"),
 }
+
+# The AI normally identifies uncertain actions itself. These patterns are an
+# authoritative safety net for common checks so the story never skips directly
+# to an outcome when the player should press Roll Dice first.
+CHECK_INTENT_RULES = (
+    (r"\b(search\w*|loot\w*|ransack\w*|frisk\w*|rifle through|check (?:the )?(?:body|corpse|pockets?|container|crate|chest|room|desk|wreck|area))\b", "investigation", "intelligence", "easy"),
+    (r"\b(investigat|inspect|examin|analy[sz]|study (?:the )?(?:clue|scene|evidence)|look for clues?|piece together)\w*\b", "investigation", "intelligence", "standard"),
+    (r"\b(haggl|bargain|barter|negotiate (?:the )?(?:price|cost)|ask for (?:a )?discount|lower (?:the )?price)\w*\b", "persuasion", "charisma", "standard"),
+    (r"\b(persuad|convinc|talk .{0,30} into|appeal to)\w*\b", "persuasion", "charisma", "standard"),
+    (r"\b(deceiv|lie to|bluff|mislead|impersonat|fake (?:a )?story)\w*\b", "deception", "charisma", "standard"),
+    (r"\b(intimidat|threaten|coerce|scare .{0,20} into)\w*\b", "intimidation", "charisma", "standard"),
+    (r"\b(sneak|hide|move quietly|creep past|slip past|avoid detection)\w*\b", "stealth", "agility", "standard"),
+    (r"\b(pickpocket|steal from|lift .{0,20} pocket|palm (?:the |an? )?item)\w*\b", "sleight_of_hand", "dexterity", "standard"),
+    (r"\b(pick (?:the )?lock|lockpick|disarm (?:the )?trap|bypass (?:the )?(?:lock|security))\w*\b", "lockpicking", "dexterity", "standard"),
+    (r"\b(track|follow (?:the )?(?:trail|tracks)|forage|navigate (?:the )?(?:wild|wilderness))\w*\b", "survival", "wisdom", "standard"),
+    (r"\b(spot|listen for|eavesdrop|scan (?:the )?(?:area|room)|look for (?:anything|something|danger|movement)|notice)\w*\b", "perception", "wisdom", "easy"),
+    (r"\b(balance|tumble|backflip|vault|dodge past|leap across)\w*\b", "acrobatics", "agility", "standard"),
+    (r"\b(climb|swim|lift|force open|break down|shove|grapple|jump across)\w*\b", "athletics", "strength", "standard"),
+    (r"\b(hack|decode|decrypt|repair|rewire|disable (?:the )?(?:alarm|device|system))\w*\b", "engineering", "intelligence", "standard"),
+    (r"\b(treat (?:the )?(?:injury|wound)|stabiliz|diagnos|first aid)\w*\b", "medicine", "wisdom", "standard"),
+)
+
+
+def _fallback_check_request(action: str) -> Dict | None:
+    text = " ".join(action.strip().lower().split())
+    for pattern, skill, attribute, difficulty in CHECK_INTENT_RULES:
+        if re.search(pattern, text):
+            return {
+                "reason": action.strip(),
+                "difficulty": difficulty,
+                "skill": skill,
+                "attribute": attribute,
+                "rules_fallback": True,
+            }
+    return None
 
 
 def _skill_for_check(request: Dict, reason: str) -> str | None:
@@ -101,6 +141,11 @@ class GameMaster:
             context["current_combat_actor"] = actor.get("name") if actor else None
 
         result = self.provider.respond(context)
+        if not result.get("requires_roll") and not isinstance(result.get("combat_request"), dict):
+            inferred_check = _fallback_check_request(action)
+            if inferred_check is not None:
+                result["requires_roll"] = True
+                result["roll"] = inferred_check
         mechanical_result = None
         combat_results: List[Dict] = []
         pending_roll = None
