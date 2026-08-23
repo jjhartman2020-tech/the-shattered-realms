@@ -104,7 +104,7 @@ def start_combat(combatants: List[Dict]) -> Dict:
     return {"active": True, "round": 1, "turn_index": 0,
             "order": [i["name"] for i in initiative], "initiative": initiative,
             "combatants": prepared, "log": ["Combat begins."],
-            "grid": {"type": "square", "distance": "orthogonal_steps"}}
+            "grid": {"type": "square", "distance": "orthogonal_steps", "width": 12, "height": 8}}
 
 
 def _find_actor(combat: Dict, name: str) -> Dict:
@@ -142,6 +142,11 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
         _require_turn(combat, actor, actor_name)
 
     destination = {"x": int(x), "y": int(y)}
+    grid = combat.get("grid") if isinstance(combat.get("grid"), dict) else {}
+    grid_width = max(1, int(grid.get("width", 12) or 12))
+    grid_height = max(1, int(grid.get("height", 8) or 8))
+    if destination["x"] < 0 or destination["x"] >= grid_width or destination["y"] < 0 or destination["y"] >= grid_height:
+        raise ValueError(f"Square ({destination['x']}, {destination['y']}) is outside the {grid_width}x{grid_height} battle grid")
     origin = _normalize_position(actor.get("position"))
     distance = abs(origin["x"] - destination["x"]) + abs(origin["y"] - destination["y"])
     movement_limit = int(actor.get("movement", 0))
