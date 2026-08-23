@@ -19,6 +19,7 @@ import backend.game.character_creation as character_creation
 from backend.ai.game_master import GameMaster
 from backend.game.armor import effective_movement, generate_starting_armor, sync_armor_summary
 from backend.game.armor_runtime import install_armor_runtime
+from backend.game.ai_stat_builder import generate_ai_allocation
 from backend.game.attributes import (
     ATTRIBUTE_NAMES,
     BASE_ARMOR_CLASS,
@@ -149,6 +150,22 @@ def _confirm_world_payload() -> Dict:
     GAME_MASTER.state.save()
     install_world_aware_character_generation(GAME_MASTER, world)
     return {"ok": True, "state": GAME_MASTER.state.snapshot(), "world": deepcopy(world)}
+
+
+def _generate_stats_payload(payload: Dict) -> Dict:
+    if not GAME_MASTER.state.data.get("world_creation_complete"):
+        return {"ok": False, "error": "Confirm the world before building character stats."}
+
+    description = str(payload.get("description") or "").strip()
+    if not description:
+        return {"ok": False, "error": "Describe the character build you want first."}
+
+    world = GAME_MASTER.state.data.get("world_profile", {})
+    allocation = generate_ai_allocation(GAME_MASTER.provider, description, world)
+    validation = validate_allocation(allocation, level=1)
+    if not validation.get("valid") or int(validation.get("skill_points_unspent", 0)) != 0:
+        return {"ok": False, "error": f"The AI build must spend exactly {STARTING_SKILL_POINTS} SP."}
+    return {"ok": True, "stats": allocation, "points_spent": STARTING_SKILL_POINTS}
 
 
 def _generate_character_payload(payload: Dict) -> Dict:
@@ -452,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
                     result = _generate_world_payload(payload)
                 elif self.path == "/creation/world/confirm":
                     result = _confirm_world_payload()
+                elif self.path == "/creation/stats/generate":
+                    result = _generate_stats_payload(payload)
                 elif self.path == "/creation/character/generate":
                     result = _generate_character_payload(payload)
                 elif self.path == "/creation/armor/generate":
