@@ -213,6 +213,11 @@ class GameState:
                         "result": str(change.get("result") or "").strip(),
                     }
                 continue
+            if kind == "set_location":
+                location = str(change.get("location") or change.get("value") or "").strip()
+                if location:
+                    self.data.setdefault("player", {})["location"] = location
+                continue
             if kind == "set_encounter_enemies":
                 enemies = change.get("enemies")
                 if isinstance(enemies, list): self.data["pending_encounter_enemies"] = [deepcopy(e) for e in enemies if isinstance(e, dict)]
