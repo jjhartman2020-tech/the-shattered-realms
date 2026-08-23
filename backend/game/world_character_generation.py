@@ -24,8 +24,11 @@ WORLD-FIT REQUIREMENTS:
 - Match the world's technology, era, supernatural rules, culture, and common gear literally. A cyberpunk/high-tech world should naturally use things such as firearms/blasters, smart weapons, drones, cyberware, scanners, med-tech, hacking tools, energy equipment, and setting-appropriate utilities when those concepts fit the profile — not bows, runestones, healing draughts, or fantasy travel gear by default.
 - Likewise, a modern, historical, sci-fi, western, superhero, post-apocalyptic, or other setting must receive gear and abilities native to THAT setting.
 - Ability flavor must fit the character AND world. Do not call a mechanical projectile 'Arc Spark' or magical unless supernatural powers actually exist in the confirmed world.
-- Starter kits should represent plausible beginner loadouts someone in this setting could actually possess.
-- Special equipment must also be setting-native.
+- CHARACTER BUILD HAS PRIORITY OVER SETTING CLICHES. The world controls technology, materials, names, and flavor; the chosen stats and intended archetype control the combat role and item function.
+- Starter kits must be cohesive variations built for THIS character's strongest stats, class concept, and playstyle—not generic examples of gear that merely exists in the setting.
+- Translate the archetype into the setting. Example: a ninja/stealth build in a high-tech space world should receive advanced stealth blades, smart throwing weapons, infiltration tools, grapnels, compact cloaking gear, or other ninja-like equipment. Do NOT replace that identity with a generic blaster user unless the build actually favors or requests firearms.
+- Weapons and tools should use attack attributes and functions that match the character's strongest stats. Do not give a low-Dexterity melee specialist a gun-focused kit, or a stealth specialist a loud heavy-weapons kit.
+- Special equipment must be both setting-native AND build-native.
 - Mechanics remain constrained by the original character-generation rules; only theme/flavor and appropriate mechanical fields should adapt to the world.
 """
         kwargs["instructions"] = str(kwargs.get("instructions") or "") + extra
