@@ -8,9 +8,17 @@ from typing import Dict, List
 from .armor import ARMOR_SLOTS, effective_movement, normalize_armor_piece, sync_armor_summary
 from .dice import normalize_damage_expression
 
+RARITY_ORDER = {"common": 0, "uncommon": 1, "rare": 2, "epic": 3, "legendary": 4}
+RARITY_VALUE_MULTIPLIER = {"common": 1.0, "uncommon": 1.25, "rare": 1.6, "epic": 2.2, "legendary": 3.0}
+
 
 def _item_type(item: Dict) -> str:
     return str(item.get("type") or "misc").strip().lower()
+
+
+def _item_rarity(item: Dict) -> str:
+    rarity = str(item.get("rarity") or "common").strip().lower()
+    return rarity if rarity in RARITY_ORDER else "common"
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -38,6 +46,7 @@ def default_sell_value(item: Dict) -> int:
         value += max(0, _safe_int(item.get("max_armor_hp", item.get("armor_hp", 0)), 0) * 2)
         bonus = item.get("stat_bonus") if isinstance(item.get("stat_bonus"), dict) else {}; value += max(0, _safe_int(bonus.get("amount"), 0) * 3)
     elif kind == "consumable" and item.get("healing"): value += max(1, _dice_sides(item.get("healing")) // 2)
+    value = round(value * RARITY_VALUE_MULTIPLIER[_item_rarity(item)])
     return max(0, value)
 
 
@@ -45,6 +54,8 @@ def ensure_inventory_sell_values(player: Dict) -> bool:
     changed = False; inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
     for item in inventory:
         if not isinstance(item, dict): continue
+        rarity = _item_rarity(item)
+        if item.get("rarity") != rarity: item["rarity"] = rarity; changed = True
         if "sell_value" not in item: item["sell_value"] = default_sell_value(item); changed = True
         if "quantity" not in item: item["quantity"] = 1; changed = True
     return changed
@@ -114,7 +125,6 @@ CATEGORY_ORDER = {
 
 
 def _inventory_category(item: Dict) -> str:
-    """Put generated items into stable player-facing inventory sections."""
     kind = _item_type(item)
     name = str(item.get("name") or "").lower()
     description = str(item.get("description") or "").lower()
@@ -136,11 +146,11 @@ def _inventory_category(item: Dict) -> str:
 
 
 def _organize_inventory(player: Dict) -> bool:
-    """Sort the stored list itself so displayed item numbers always match equip numbers."""
     inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
     before = [id(item) for item in inventory]
     inventory.sort(key=lambda item: (
         CATEGORY_ORDER.get(_inventory_category(item), 99) if isinstance(item, dict) else 99,
+        RARITY_ORDER.get(_item_rarity(item), 0) if isinstance(item, dict) else 0,
         str(item.get("name") or "").lower() if isinstance(item, dict) else str(item).lower(),
     ))
     return before != [id(item) for item in inventory]
@@ -182,7 +192,8 @@ def show_inventory(game_master) -> None:
             current_category = category
         desc = str(item.get("description") or "").strip(); desc_text = f" — {desc}" if desc else ""; quantity = max(1, _safe_int(item.get("quantity"), 1)); quantity_text = f" x{quantity}" if quantity > 1 else ""; sell_value = default_sell_value(item)
         sell_text = "Unsellable" if sell_value <= 0 else f"Sell Value {_currency_label(game_master, sell_value)}" + (" each" if quantity > 1 else "")
-        print(f"  {index}. {item.get('name','Item')}{quantity_text} ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}")
+        rarity = _item_rarity(item).title()
+        print(f"  {index}. {item.get('name','Item')}{quantity_text} [{rarity}] ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}")
         print(f"     {_item_mechanics(item)} | {sell_text}")
     print("\nType 'equip' to change your equipped weapon, shield, or armor piece.")
 
