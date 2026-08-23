@@ -134,7 +134,9 @@ ARMOR RULES
 
 CHECK RULES
 - Ordinary uncontested actions do not need rolls. Risky, contested, uncertain non-combat actions whose success matters require a check.
+- Common examples that normally require a check include searching bodies/rooms/containers for hidden things, investigating clues, haggling or negotiating a price, persuading, deceiving, intimidating, sneaking, stealing, lockpicking, tracking, noticing hidden danger, difficult physical movement, hacking/repairing under uncertainty, and treating injuries under pressure.
 - On the first pass, if a check is needed, set requires_roll=true and choose the most appropriate skill, governing core attribute, and difficulty from trivial, easy, standard, hard, very_hard, extreme. Never invent the die result.
+- STOP the narration immediately before the uncertain outcome. Do not reveal success, failure, hidden information, loot, a changed price, or other consequences until context returns with mechanical_result after the player presses Roll Dice.
 - Easy (DC 8) is the BASE/default check. Use it when success should happen more often than not for an ordinary person under the current circumstances.
 - Standard (DC 12) is CHALLENGING. Use it when success is genuinely uncertain and a decent stat, useful skill, or good plan matters.
 - Hard (DC 16) is UNLIKELY for an ordinary person. Use it for strongly opposed actions, major disadvantages, or notably difficult feats.
