@@ -10,125 +10,95 @@ const ACCENT := Color("8b5cf6")
 const ACCENT_HOVER := Color("a78bfa")
 const DANGER := Color("fb7185")
 
-var menu_button: Button
-var backdrop: ColorRect
 var new_game_confirm: ConfirmationDialog
 var http: HTTPRequest
 var large_text := false
+var large_text_button: Button
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	z_index = 100
-	call_deferred("_build_menu")
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	visible = false
+	_build_menu()
 
 
 func _build_menu() -> void:
-	menu_button = _button("☰  MENU", false)
-	menu_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	menu_button.offset_left = -145.0
-	menu_button.offset_right = -25.0
-	menu_button.offset_top = 18.0
-	menu_button.offset_bottom = 58.0
-	menu_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	menu_button.z_index = 2
-	menu_button.pressed.connect(_open_menu)
-	add_child(menu_button)
-
-	backdrop = ColorRect.new()
+	# The dark backdrop is visual only. It deliberately ignores mouse input so
+	# clicks can reach the actual menu controls above it.
+	var backdrop := ColorRect.new()
 	backdrop.color = Color(0, 0, 0, 0.72)
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
-	backdrop.z_index = 1
-	backdrop.hide()
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backdrop.add_child(center)
+	center.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(center)
 
 	var menu_panel := _panel(PANEL)
-	menu_panel.custom_minimum_size = Vector2(690, 650)
+	menu_panel.custom_minimum_size = Vector2(560, 390)
+	menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	center.add_child(menu_panel)
 
 	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_PASS
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 24)
+		margin.add_theme_constant_override(side, 28)
 	menu_panel.add_child(margin)
 
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 16)
+	root.add_theme_constant_override("separation", 18)
+	root.mouse_filter = Control.MOUSE_FILTER_PASS
 	margin.add_child(root)
 
 	var header := HBoxContainer.new()
+	header.mouse_filter = Control.MOUSE_FILTER_PASS
 	root.add_child(header)
+
 	var title := Label.new()
-	title.text = "GAME MENU"
+	title.text = "SETTINGS"
 	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", TEXT)
 	header.add_child(title)
+
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(spacer)
+
 	var close := _button("✕", false)
-	close.custom_minimum_size = Vector2(44, 40)
+	close.custom_minimum_size = Vector2(48, 42)
 	close.pressed.connect(_close_menu)
 	header.add_child(close)
 
 	var sub := Label.new()
-	sub.text = "Open game screens directly instead of typing commands."
+	sub.text = "Game settings and campaign controls."
 	sub.add_theme_color_override("font_color", MUTED)
 	sub.add_theme_font_size_override("font_size", 15)
 	root.add_child(sub)
-	root.add_child(HSeparator.new())
-	root.add_child(_section_label("GAME"))
-
-	var game_grid := GridContainer.new()
-	game_grid.columns = 2
-	game_grid.add_theme_constant_override("h_separation", 10)
-	game_grid.add_theme_constant_override("v_separation", 10)
-	root.add_child(game_grid)
-	for entry in [
-		["PLAYER", "player"], ["INVENTORY", "inventory"],
-		["EQUIPMENT", "equipment"], ["ABILITIES", "abilities"],
-		["PROGRESSION", "progression"], ["WALLET", "wallet"],
-		["MAP", "map"], ["PARTY", "party"],
-		["CAMPAIGN SUMMARY", "summary"], ["GALLERY", "gallery"]
-	]:
-		_add_nav_button(game_grid, entry[0], entry[1])
 
 	root.add_child(HSeparator.new())
-	root.add_child(_section_label("DISPLAY / APP"))
-	var utility_grid := GridContainer.new()
-	utility_grid.columns = 2
-	utility_grid.add_theme_constant_override("h_separation", 10)
-	utility_grid.add_theme_constant_override("v_separation", 10)
-	root.add_child(utility_grid)
+	root.add_child(_section_label("DISPLAY"))
 
-	var text_button := _button("TOGGLE LARGE TEXT", false)
-	text_button.custom_minimum_size = Vector2(310, 42)
-	text_button.pressed.connect(_toggle_large_text)
-	utility_grid.add_child(text_button)
+	large_text_button = _button("LARGE TEXT: OFF", false)
+	large_text_button.custom_minimum_size = Vector2(0, 48)
+	large_text_button.pressed.connect(_toggle_large_text)
+	root.add_child(large_text_button)
 
-	var refresh := _button("REFRESH GAME STATE", false)
-	refresh.custom_minimum_size = Vector2(310, 42)
-	refresh.pressed.connect(_refresh_state)
-	utility_grid.add_child(refresh)
+	root.add_child(HSeparator.new())
+	root.add_child(_section_label("CAMPAIGN"))
 
-	var return_button := _button("RETURN TO GAME", true)
-	return_button.custom_minimum_size = Vector2(310, 42)
-	return_button.pressed.connect(_close_menu)
-	utility_grid.add_child(return_button)
-
-	var new_game := _button("NEW GAME", false)
-	new_game.custom_minimum_size = Vector2(310, 42)
+	var new_game := _button("START NEW GAME", false)
+	new_game.custom_minimum_size = Vector2(0, 52)
 	new_game.add_theme_color_override("font_color", DANGER)
 	new_game.pressed.connect(_ask_new_game)
-	utility_grid.add_child(new_game)
+	root.add_child(new_game)
 
 	var note := Label.new()
-	note.text = "New Game clears the current saved campaign and AI campaign memory. You will always get a confirmation first."
+	note.text = "Starting a new game clears the current campaign state and AI campaign memory on this device."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note.add_theme_color_override("font_color", MUTED)
 	note.add_theme_font_size_override("font_size", 13)
@@ -169,6 +139,8 @@ func _panel(color: Color) -> PanelContainer:
 func _button(value: String, primary: bool) -> Button:
 	var button := Button.new()
 	button.text = value
+	button.focus_mode = Control.FOCUS_ALL
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = ACCENT if primary else PANEL_ALT
 	normal.border_color = ACCENT if primary else BORDER
@@ -184,108 +156,19 @@ func _button(value: String, primary: bool) -> Button:
 	return button
 
 
-func _add_nav_button(grid: GridContainer, label: String, kind: String) -> void:
-	var button := _button(label, false)
-	button.custom_minimum_size = Vector2(310, 42)
-	button.pressed.connect(_open_screen.bind(kind))
-	grid.add_child(button)
-
-
 func _open_menu() -> void:
-	backdrop.show()
-	menu_button.hide()
+	visible = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	move_to_front()
 
 
 func _close_menu() -> void:
-	backdrop.hide()
-	menu_button.show()
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-
-func _open_screen(kind: String) -> void:
-	var parent = get_parent()
-	if parent == null:
-		return
-	match kind:
-		"equipment":
-			parent.context_title.text = "EQUIPMENT"
-			parent.context_text.text = _equipment_text(parent.latest_state)
-		"abilities":
-			parent.context_title.text = "ABILITIES"
-			parent.context_text.text = _abilities_text(parent.latest_state)
-		"progression":
-			parent.context_title.text = "PROGRESSION"
-			parent.context_text.text = _progression_text(parent.latest_state)
-		"wallet":
-			parent.context_title.text = "WALLET"
-			var player: Dictionary = parent.latest_state.get("player", {}) if parent.latest_state.get("player", {}) is Dictionary else {}
-			parent.context_text.text = "Current balance:\n\n" + parent._money_text(player)
-		_:
-			parent._show_context(kind)
-	_close_menu()
-
-
-func _equipment_text(state: Dictionary) -> String:
-	var player: Dictionary = state.get("player", {}) if state.get("player", {}) is Dictionary else {}
-	var lines: Array[String] = []
-	lines.append("WEAPON\n" + _item_line(player.get("equipped_weapon")))
-	lines.append("SHIELD\n" + _item_line(player.get("equipped_shield")))
-	lines.append("ARMOR")
-	var armor = player.get("equipped_armor")
-	if armor is Dictionary and not armor.is_empty():
-		for slot in ["helmet", "breastplate", "pants", "gloves", "boots"]:
-			lines.append("%s: %s" % [slot.capitalize(), _item_line(armor.get(slot))])
-	else:
-		lines.append("No armor equipped.")
-	return "\n\n".join(lines)
-
-
-func _item_line(item) -> String:
-	if not item is Dictionary:
-		return "None"
-	var rarity := str(item.get("rarity", "common")).capitalize()
-	var detail := ""
-	if item.get("damage"):
-		detail = " • Damage " + str(item.get("damage"))
-	elif item.get("shield"):
-		detail = " • Shield HP " + str(item.get("shield"))
-	elif item.get("max_armor_hp"):
-		detail = " • Armor HP " + str(item.get("max_armor_hp"))
-	return "%s [%s]%s" % [str(item.get("name", "Item")), rarity, detail]
-
-
-func _abilities_text(state: Dictionary) -> String:
-	var player: Dictionary = state.get("player", {}) if state.get("player", {}) is Dictionary else {}
-	var equipped = player.get("equipped_abilities")
-	var unlocked = player.get("unlocked_abilities")
-	var lines: Array[String] = ["EQUIPPED (max 4)"]
-	if equipped is Array and not equipped.is_empty():
-		for ability in equipped:
-			if ability is Dictionary:
-				lines.append("• %s — Cost %s %s" % [str(ability.get("name", "Ability")), str(ability.get("resource_cost", 0)), str(player.get("resource_name", "Resource"))])
-	else:
-		lines.append("None equipped.")
-	lines.append("\nUNLOCKED")
-	if unlocked is Array and not unlocked.is_empty():
-		for ability in unlocked:
-			if ability is Dictionary:
-				lines.append("• %s [%s]" % [str(ability.get("name", "Ability")), str(ability.get("tier", "beginner")).capitalize()])
-	else:
-		lines.append("No unlocked abilities.")
-	return "\n".join(lines)
-
-
-func _progression_text(state: Dictionary) -> String:
-	var player: Dictionary = state.get("player", {}) if state.get("player", {}) is Dictionary else {}
-	return "Level %d / 100\nXP Orbs: %d / %d\n\nStored SP: %d\nStored AP: %d" % [
-		int(player.get("level", 1)), int(player.get("xp_orbs", 0)), int(player.get("xp_to_next_level", 0)),
-		int(player.get("skill_points_unspent", 0)), int(player.get("ability_points", 0))
-	]
+	visible = false
 
 
 func _toggle_large_text() -> void:
 	large_text = not large_text
+	large_text_button.text = "LARGE TEXT: ON" if large_text else "LARGE TEXT: OFF"
 	var parent = get_parent()
 	if parent == null:
 		return
@@ -293,31 +176,22 @@ func _toggle_large_text() -> void:
 	parent.context_text.add_theme_font_size_override("normal_font_size", 19 if large_text else 16)
 
 
-func _refresh_state() -> void:
-	var parent = get_parent()
-	_close_menu()
-	if parent != null:
-		parent._load_session()
-
-
 func _ask_new_game() -> void:
 	new_game_confirm.popup_centered(Vector2i(520, 190))
 
 
 func _start_new_game() -> void:
-	_close_menu()
-	menu_button.disabled = true
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var error := http.request(API_BASE + "/new_game", headers, HTTPClient.METHOD_POST, "{}")
 	if error != OK:
-		menu_button.disabled = false
 		var parent = get_parent()
 		if parent != null:
 			parent._set_connection_error("Could not start new game")
+		return
+	_close_menu()
 
 
 func _on_new_game_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	menu_button.disabled = false
 	var parent = get_parent()
 	if parent == null:
 		return
