@@ -1,3 +1,7 @@
+# Godot editor cache
+.godot/
+**/.godot/
+
 # Logs
 logs
 *.log
@@ -99,7 +103,7 @@ dist
 .serverless/
 
 # FuseBox
-.fusebox
+.fusebox/
 
 # DynamoDB Local
 .dynamodb/
@@ -118,14 +122,3 @@ dist
 
 # yarn v3
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-
-# Vite files
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-.vite/
