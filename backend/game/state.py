@@ -27,6 +27,8 @@ DEFAULT_SKILLS = {
     "spellcasting": 0, "channeling": 0,
 }
 
+RARITIES = {"common", "uncommon", "rare", "epic", "legendary"}
+
 DEFAULT_STATE = {
     "campaign": {"name": "Untitled Campaign", "genre": "custom", "day": 1, "time": "morning"},
     "campaign_status": "no_character",
@@ -48,7 +50,7 @@ DEFAULT_STATE = {
         "currency": {"copper": 0, "silver": 0, "gold": 0}, "features": [], "traits": [],
         "conditions": [], "location": "unknown",
     },
-    "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {},
+    "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {"loot_sources": {}},
     "combat": {"active": False}, "encounter_template": {}, "encounter_reset_pending": False,
     "pending_encounter_enemies": [], "turn": 0,
 }
@@ -105,7 +107,15 @@ class GameState:
             if name in skills: migrated[name] = int(skills.get(name, 0) or 0)
         player["skills"] = migrated
         inventory = player.get("inventory")
-        if not isinstance(inventory, list): player["inventory"] = []
+        if not isinstance(inventory, list):
+            player["inventory"] = []
+        else:
+            for item in inventory:
+                if not isinstance(item, dict): continue
+                rarity = str(item.get("rarity") or "common").strip().lower()
+                item["rarity"] = rarity if rarity in RARITIES else "common"
+        world_flags = self.data.setdefault("world_flags", {})
+        if not isinstance(world_flags.get("loot_sources"), dict): world_flags["loot_sources"] = {}
         if not completed:
             for key in ("unlocked_abilities", "equipped_abilities"):
                 items = player.get(key)
@@ -157,7 +167,8 @@ class GameState:
         item = deepcopy(raw_item)
         name = str(item.get("name") or "Item").strip() or "Item"
         item_type = str(item.get("type") or "misc").strip().lower() or "misc"
-        item["name"] = name; item["type"] = item_type
+        rarity = str(item.get("rarity") or "common").strip().lower()
+        item["name"] = name; item["type"] = item_type; item["rarity"] = rarity if rarity in RARITIES else "common"
         try: quantity = max(1, int(item.get("quantity", 1) or 1))
         except (TypeError, ValueError): quantity = 1
         try: sell_value = max(0, int(item.get("sell_value", 0) or 0))
@@ -169,7 +180,7 @@ class GameState:
         if stackable:
             for existing in inventory:
                 if not isinstance(existing, dict): continue
-                if str(existing.get("name") or "").strip().lower() == name.lower() and str(existing.get("type") or "misc").strip().lower() == item_type:
+                if str(existing.get("name") or "").strip().lower() == name.lower() and str(existing.get("type") or "misc").strip().lower() == item_type and str(existing.get("rarity") or "common").lower() == item["rarity"]:
                     try: existing_qty = max(1, int(existing.get("quantity", 1) or 1))
                     except (TypeError, ValueError): existing_qty = 1
                     existing["quantity"] = existing_qty + quantity
@@ -185,6 +196,16 @@ class GameState:
             if kind == "award_xp_orbs": self.award_xp_orbs(int(change.get("amount", 0) or 0)); continue
             if kind == "add_inventory_item":
                 self._add_inventory_item(self.data.setdefault("player", {}), change.get("item") if isinstance(change.get("item"), dict) else {})
+                continue
+            if kind == "mark_loot_source":
+                source_id = str(change.get("source_id") or "").strip().lower().replace(" ", "_")
+                if source_id:
+                    loot_sources = self.data.setdefault("world_flags", {}).setdefault("loot_sources", {})
+                    loot_sources[source_id] = {
+                        "searched": bool(change.get("searched", True)),
+                        "looted": bool(change.get("looted", False)),
+                        "result": str(change.get("result") or "").strip(),
+                    }
                 continue
             if kind == "set_encounter_enemies":
                 enemies = change.get("enemies")
