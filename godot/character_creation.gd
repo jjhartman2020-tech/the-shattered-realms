@@ -755,6 +755,8 @@ func _finish_into_game(payload: Dictionary) -> void:
 	parent._show_context("player")
 	parent.connection_label.text = "● BACKEND CONNECTED"
 	parent.connection_label.add_theme_color_override("font_color", SUCCESS)
+	if parent.has_method("_enter_world_mode"):
+		parent.call("_enter_world_mode", payload)
 	visible = false
 
 
