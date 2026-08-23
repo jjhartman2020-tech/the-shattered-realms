@@ -7,6 +7,7 @@ from backend.game.level_up import run_spending_screen
 from backend.game.ability_learning import run_ap_spending_screen
 from backend.game.armor_runtime import finish_character_creation_with_armor, install_armor_runtime
 from backend.game.inventory import show_inventory, show_equipment, run_equipment_screen
+from backend.game.economy import ensure_wallet, format_money, run_shop_screen, wallet_text
 from backend.game.attributes import SKILL_ATTRIBUTE
 from backend.game.combat import current_actor, end_turn
 
@@ -339,11 +340,13 @@ def _print_resume_recap(game_master: GameMaster) -> None:
     ap = int(player.get("ability_points", 0) or 0)
     location = str(player.get("location") or "Unknown")
     weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else None
+    wallet = ensure_wallet(game_master, grant_starting_funds=True)
 
     print("\n📍 CURRENT STATUS")
     print(f"Location: {location}")
     shield_text = f" | Shield: {shield}/{max_shield}" if max_shield > 0 else ""
     print(f"HP: {hp}/{max_hp}{shield_text} | Armor: {armor}/{max_armor} | {resource_name}: {resource}/{max_resource}")
+    print(f"Money: {format_money(wallet.get('amount', 0), wallet)}")
     print(f"Level: {level}/100 | XP Orbs: {xp}/{xp_needed} | Stored SP: {sp} | Stored AP: {ap}")
     if weapon:
         print(f"Weapon: {weapon.get('name', 'Weapon')} | Damage {weapon.get('damage', '?')} | Range {weapon.get('range', '?')}")
@@ -362,6 +365,8 @@ def main() -> None:
 
     saved_combat = game_master.state.data.get("combat")
     player_state = game_master.state.data.get("player", {})
+    if isinstance(player_state, dict) and player_state.get("character_creation_complete"):
+        ensure_wallet(game_master, grant_starting_funds=True)
     if isinstance(saved_combat, dict) and saved_combat.get("active"):
         print("\n⚔️ RESUMING ACTIVE COMBAT")
         _print_combat_hud(saved_combat, player_state)
@@ -372,6 +377,7 @@ def main() -> None:
         print("Type 'start game' to create a world, build a character, and begin a new adventure.")
         print("Type 'progress' to view Level, XP Orbs, SP, and stored AP.")
         print("Type 'inventory' to view your items and equipped armor/gear. Type 'equipment' to view equipped gear only. Type 'equip' to swap gear.")
+        print("Type 'wallet' to view your money. Type 'shop' when visiting a merchant.")
         print("Type 'spend sp' to upgrade stats. Type 'spend ap' to learn abilities. Type 'quit' to stop.\n")
 
     while True:
@@ -391,6 +397,12 @@ def main() -> None:
             continue
         if lowered in {"equip", "change equipment", "swap gear", "swap equipment"}:
             run_equipment_screen(game_master)
+            continue
+        if lowered in {"wallet", "money", "balance", "currency"}:
+            print(f"\n💰 Balance: {wallet_text(game_master)}")
+            continue
+        if lowered in {"shop", "merchant", "store", "trade"}:
+            run_shop_screen(game_master)
             continue
         if lowered in {"spend sp", "spend skill points", "upgrade stats", "level stats"}:
             player = run_spending_screen(game_master)
@@ -413,11 +425,13 @@ def main() -> None:
             created = run_character_creation(game_master)
             created = finish_character_creation_with_armor(game_master, created)
             player = created["player"]
+            wallet = ensure_wallet(game_master, grant_starting_funds=True)
             print("\n" + "=" * 48)
             print(f"{player.get('name')} — {player.get('class')}")
             print(f"World: {world.get('name', 'Custom World')}")
             shield_text = f" | Shield: {player.get('shield_hp',0)}/{player.get('max_shield_hp',0)}" if int(player.get('max_shield_hp',0) or 0) > 0 else ""
             print(f"HP: {player.get('hp')}/{player.get('max_hp')}{shield_text} | Armor: {player.get('armor',0)}/{player.get('max_armor',0)} | {player.get('resource_name')}: {player.get('resource')}/{player.get('max_resource')}")
+            print(f"Money: {format_money(wallet.get('amount', 0), wallet)}")
             _print_progress(player)
             print("Abilities:", ", ".join(str(a.get("name")) for a in player.get("equipped_abilities", []) if isinstance(a, dict)))
             print("=" * 48)
