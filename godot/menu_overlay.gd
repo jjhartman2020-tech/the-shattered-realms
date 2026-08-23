@@ -1,7 +1,6 @@
 extends Control
 
 const API_BASE := "http://127.0.0.1:8765"
-const BG := Color("0b0f17")
 const PANEL := Color("151b26")
 const PANEL_ALT := Color("101621")
 const BORDER := Color("2b3547")
@@ -13,7 +12,6 @@ const DANGER := Color("fb7185")
 
 var menu_button: Button
 var backdrop: ColorRect
-var menu_panel: PanelContainer
 var new_game_confirm: ConfirmationDialog
 var http: HTTPRequest
 var large_text := false
@@ -22,19 +20,19 @@ var large_text := false
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	z_index = 100
 	call_deferred("_build_menu")
 
 
 func _build_menu() -> void:
-	var parent = get_parent()
-	if parent == null:
-		return
-
 	menu_button = _button("☰  MENU", false)
-	menu_button.custom_minimum_size = Vector2(120, 40)
 	menu_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	menu_button.position = Vector2(-145, 18)
+	menu_button.offset_left = -145.0
+	menu_button.offset_right = -25.0
+	menu_button.offset_top = 18.0
+	menu_button.offset_bottom = 58.0
 	menu_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	menu_button.z_index = 2
 	menu_button.pressed.connect(_open_menu)
 	add_child(menu_button)
 
@@ -42,6 +40,7 @@ func _build_menu() -> void:
 	backdrop.color = Color(0, 0, 0, 0.72)
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.z_index = 1
 	backdrop.hide()
 	add_child(backdrop)
 
@@ -49,7 +48,7 @@ func _build_menu() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.add_child(center)
 
-	menu_panel = _panel(PANEL)
+	var menu_panel := _panel(PANEL)
 	menu_panel.custom_minimum_size = Vector2(690, 650)
 	center.add_child(menu_panel)
 
@@ -82,26 +81,22 @@ func _build_menu() -> void:
 	sub.add_theme_color_override("font_color", MUTED)
 	sub.add_theme_font_size_override("font_size", 15)
 	root.add_child(sub)
-
 	root.add_child(HSeparator.new())
+	root.add_child(_section_label("GAME"))
 
-	var game_heading := _section_label("GAME")
-	root.add_child(game_heading)
 	var game_grid := GridContainer.new()
 	game_grid.columns = 2
 	game_grid.add_theme_constant_override("h_separation", 10)
 	game_grid.add_theme_constant_override("v_separation", 10)
 	root.add_child(game_grid)
-	_add_nav_button(game_grid, "PLAYER", "player")
-	_add_nav_button(game_grid, "INVENTORY", "inventory")
-	_add_nav_button(game_grid, "EQUIPMENT", "equipment")
-	_add_nav_button(game_grid, "ABILITIES", "abilities")
-	_add_nav_button(game_grid, "PROGRESSION", "progression")
-	_add_nav_button(game_grid, "WALLET", "wallet")
-	_add_nav_button(game_grid, "MAP", "map")
-	_add_nav_button(game_grid, "PARTY", "party")
-	_add_nav_button(game_grid, "CAMPAIGN SUMMARY", "summary")
-	_add_nav_button(game_grid, "GALLERY", "gallery")
+	for entry in [
+		["PLAYER", "player"], ["INVENTORY", "inventory"],
+		["EQUIPMENT", "equipment"], ["ABILITIES", "abilities"],
+		["PROGRESSION", "progression"], ["WALLET", "wallet"],
+		["MAP", "map"], ["PARTY", "party"],
+		["CAMPAIGN SUMMARY", "summary"], ["GALLERY", "gallery"]
+	]:
+		_add_nav_button(game_grid, entry[0], entry[1])
 
 	root.add_child(HSeparator.new())
 	root.add_child(_section_label("DISPLAY / APP"))
@@ -234,10 +229,8 @@ func _open_screen(kind: String) -> void:
 func _equipment_text(state: Dictionary) -> String:
 	var player: Dictionary = state.get("player", {}) if state.get("player", {}) is Dictionary else {}
 	var lines: Array[String] = []
-	var weapon = player.get("equipped_weapon")
-	lines.append("WEAPON\n" + _item_line(weapon))
-	var shield = player.get("equipped_shield")
-	lines.append("SHIELD\n" + _item_line(shield))
+	lines.append("WEAPON\n" + _item_line(player.get("equipped_weapon")))
+	lines.append("SHIELD\n" + _item_line(player.get("equipped_shield")))
 	lines.append("ARMOR")
 	var armor = player.get("equipped_armor")
 	if armor is Dictionary and not armor.is_empty():
@@ -286,11 +279,8 @@ func _abilities_text(state: Dictionary) -> String:
 func _progression_text(state: Dictionary) -> String:
 	var player: Dictionary = state.get("player", {}) if state.get("player", {}) is Dictionary else {}
 	return "Level %d / 100\nXP Orbs: %d / %d\n\nStored SP: %d\nStored AP: %d" % [
-		int(player.get("level", 1)),
-		int(player.get("xp_orbs", 0)),
-		int(player.get("xp_to_next_level", 0)),
-		int(player.get("skill_points_unspent", 0)),
-		int(player.get("ability_points", 0))
+		int(player.get("level", 1)), int(player.get("xp_orbs", 0)), int(player.get("xp_to_next_level", 0)),
+		int(player.get("skill_points_unspent", 0)), int(player.get("ability_points", 0))
 	]
 
 
@@ -340,8 +330,7 @@ func _on_new_game_completed(result: int, response_code: int, _headers: PackedStr
 		return
 	parent.latest_state = parsed.get("state", {}) if parsed.get("state", {}) is Dictionary else {}
 	parent.story_history.clear()
-	var narration := str(parsed.get("narration", "New campaign started."))
-	parent.story_history.append("GM: " + narration)
+	parent.story_history.append("GM: " + str(parsed.get("narration", "New campaign started.")))
 	parent._update_player_panel()
 	parent._refresh_story()
 	parent._set_suggestions(parsed.get("suggested_actions", []))
