@@ -208,6 +208,8 @@ func _on_new_game_completed(result: int, response_code: int, _headers: PackedStr
 	parent._set_suggestions(parsed.get("suggested_actions", []))
 	parent._show_context("player")
 	parent.connection_label.text = "● BACKEND CONNECTED"
+	if parent.has_method("_leave_world_mode"):
+		parent.call("_leave_world_mode")
 
 	var creator = parent.get_node_or_null("CharacterCreation")
 	if creator != null:
