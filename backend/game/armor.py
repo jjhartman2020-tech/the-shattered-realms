@@ -120,6 +120,53 @@ def _fallback_sets(description: str = "") -> List[Dict]:
     ]
 
 
+def _starting_weight_target(total_armor: int) -> int:
+    """Tie protection to a meaningful movement tradeoff for starting armor."""
+    total_armor = max(STARTING_ARMOR_MIN, min(STARTING_ARMOR_MAX, int(total_armor)))
+    if total_armor <= 12:
+        return 7   # Light: no movement penalty.
+    if total_armor <= 16:
+        return 12  # Balanced: heavier, but still no movement penalty.
+    if total_armor <= 19:
+        return 17  # Protective: -1 Movement.
+    return 23      # Maximum starter protection: -2 Movement.
+
+
+def _rebalance_piece_weights(pieces: List[Dict], target_weight: int) -> None:
+    """Scale piece weights to an exact set total while keeping every real piece believable."""
+    minimums = [1 if int(piece.get("armor_hp", 0) or 0) > 0 else 0 for piece in pieces]
+    raw_weights = [max(minimums[i], int(piece.get("weight", 0) or 0)) for i, piece in enumerate(pieces)]
+    if sum(raw_weights) <= 0:
+        raw_weights = [max(minimums[i], int(piece.get("armor_hp", 0) or 0)) for i, piece in enumerate(pieces)]
+
+    raw_total = max(1, sum(raw_weights))
+    scaled = [max(minimums[i], round(raw_weights[i] * target_weight / raw_total)) for i in range(len(pieces))]
+    difference = target_weight - sum(scaled)
+    adjustment_order = [1, 2, 0, 4, 3]  # Breastplate and pants carry most weight.
+    cursor = 0
+    while difference != 0 and cursor < 500:
+        index = adjustment_order[cursor % len(adjustment_order)]
+        if difference > 0:
+            scaled[index] += 1
+            difference -= 1
+        elif scaled[index] > minimums[index]:
+            scaled[index] -= 1
+            difference += 1
+        cursor += 1
+
+    for piece, weight in zip(pieces, scaled):
+        piece["weight"] = max(0, int(weight))
+
+
+def _custom_armor_target(request: str) -> int:
+    text = str(request or "").lower()
+    if any(word in text for word in ("heavy", "tank", "fortress", "reinforced", "full plate", "maximum protection")):
+        return 20
+    if any(word in text for word in ("light", "lightweight", "stealth", "ninja", "scout", "mobile", "speed", "flexible")):
+        return 11
+    return 15
+
+
 def _normalize_set(raw: Dict, target_total: int) -> Dict:
     result=deepcopy(raw) if isinstance(raw,dict) else {}; pieces_raw=result.get("pieces",[]) if isinstance(result.get("pieces"),list) else []
     by_slot={str(p.get("slot","")).lower():normalize_armor_piece(p) for p in pieces_raw if isinstance(p,dict)}; pieces=[]
@@ -129,6 +176,7 @@ def _normalize_set(raw: Dict, target_total: int) -> Dict:
     elif current!=target_total:
         scaled=[max(0,round(p["armor_hp"]*target_total/current)) for p in pieces]; diff=target_total-sum(scaled); scaled[1]+=diff
         for p,hp in zip(pieces,scaled): p["armor_hp"]=max(0,hp)
+    _rebalance_piece_weights(pieces, _starting_weight_target(target_total))
     # Beginner armor gets only a small passive stat-bonus budget across the whole set.
     budget=STARTING_STAT_BONUS_BUDGET
     for p in pieces:
@@ -136,14 +184,17 @@ def _normalize_set(raw: Dict, target_total: int) -> Dict:
         if not bonus or budget<=0: p["stat_bonus"]=None; continue
         amount=min(max(1,_safe_int(bonus.get("amount",1),1)),3,budget); p["stat_bonus"]={"stat":bonus["stat"],"amount":amount}; budget-=amount
     for p in pieces: p["max_armor_hp"]=p["armor_hp"]
-    result["pieces"]=pieces; result["total_armor"]=sum(p["armor_hp"] for p in pieces); result["tier"]="beginner"; return result
+    result["pieces"]=pieces; result["total_armor"]=sum(p["armor_hp"] for p in pieces); result["total_weight"]=sum(p["weight"] for p in pieces); result["tier"]="beginner"; return result
 
 
 def generate_starting_armor(provider, world: Dict, player: Dict, request: str = "", custom: bool = False) -> List[Dict]:
     client=getattr(provider,"client",None); model=getattr(provider,"model",None)
     if client is None or not model:
-        sets=_fallback_sets(request); return [_normalize_set(s,total) for s,total in zip(sets,(14,17,20))]
-    instructions="""Return ONLY JSON. Generate beginner armor using the confirmed world and character. Armor NEVER adds AC. Armor is a separate health bar that absorbs damage before HP. There are exactly five slots: helmet, breastplate, pants, gloves, boots. A full STARTING set totals only 10-20 Armor HP. Breastplate usually provides the most Armor HP. HEAVIER armor may slow the character through weight, handled by Python.
+        sets=_fallback_sets(request)
+        targets=[_custom_armor_target(request)] if custom else [11,15,20]
+        return [_normalize_set(s,targets[min(i,len(targets)-1)]) for i,s in enumerate(sets[:len(targets)])]
+    instructions="""Return ONLY JSON. Generate beginner armor using the confirmed world and character. Armor NEVER adds AC. Armor is a separate health bar that absorbs damage before HP. There are exactly five slots: helmet, breastplate, pants, gloves, boots. Protection and weight MUST rise together: light armor is about 11 Armor HP and Weight 7; balanced armor is about 15 Armor HP and Weight 12; maximum-protection starter armor is 20 Armor HP and Weight 23, which costs -2 Movement. Never describe high-protection armor as lightweight. Breastplate usually provides the most Armor HP and weight. Python enforces the final totals.
+If custom_mode=false, return exactly three sets in this order: LIGHT, BALANCED, HEAVY. If custom_mode=true, match the requested protection style; stealth, ninja, scout, mobile, or lightweight concepts should be light rather than receiving maximum Armor HP.
 ARMOR PIECES DO NOT HAVE MINI-ABILITIES, ACTIVE POWERS, MOVEMENT EFFECTS, RESISTANCES, SHIELDS, ATTACKS, HEALING, JET-PACK ACTIONS, OR OTHER SPECIAL MECHANICS. Their ONLY bonus beyond Armor HP is an optional passive stat_bonus to ONE of the 13 core stats: health, resource, strength, dexterity, agility, constitution, intelligence, wisdom, charisma, speed, defense, luck, magic. stat_bonus.amount must be an integer from 1 to 3. Beginner sets should be modest; do not put bonuses on every piece and keep the total bonus small. If the player describes something like a jet pack, powered gloves, targeting visor, flame lining, etc., preserve that in the LOOK/DESCRIPTION but translate the mechanical benefit ONLY into an appropriate stat bonus, e.g. speed, agility, dexterity, defense, or constitution.
 Every piece needs name, slot, armor_hp, weight, stat_bonus. armor_hp and weight MUST be JSON integers. stat_bonus must be null or {\"stat\":\"speed\",\"amount\":1}. If custom_request is supplied, honor its appearance/theme but balance it to Beginner strength. If custom_mode=true return exactly 1 set; otherwise exactly 3 choices. Top-level JSON: {\"sets\":[{\"name\":...,\"description\":...,\"pieces\":[...]}]}."""
     payload={"world":world,"player":{"class":player.get("class"),"stats":player.get("stats"),"appearance":player.get("appearance")},"custom_mode":custom,"custom_request":request}
@@ -152,7 +203,8 @@ Every piece needs name, slot, armor_hp, weight, stat_bonus. armor_hp and weight 
     except Exception: data={}
     sets=data.get("sets",[]) if isinstance(data,dict) else []
     if not isinstance(sets,list) or len(sets)!=(1 if custom else 3): sets=_fallback_sets(request)[:1] if custom else _fallback_sets()
-    targets=[15] if custom else [14,17,20]; return [_normalize_set(s,targets[min(i,len(targets)-1)]) for i,s in enumerate(sets)]
+    targets=[_custom_armor_target(request)] if custom else [11,15,20]
+    return [_normalize_set(s,targets[min(i,len(targets)-1)]) for i,s in enumerate(sets)]
 
 
 def _bonus_text(piece: Dict) -> str:
