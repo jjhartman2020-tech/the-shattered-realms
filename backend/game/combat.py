@@ -140,6 +140,8 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
         raise ValueError(f"{actor_name} is defeated and cannot move")
     if enforce_turn:
         _require_turn(combat, actor, actor_name)
+    if actor.get("attack_committed"):
+        raise ValueError(f"{actor_name} has already attacked; attacking ends movement for this turn")
 
     destination = {"x": int(x), "y": int(y)}
     grid = combat.get("grid") if isinstance(combat.get("grid"), dict) else {}
@@ -176,6 +178,208 @@ def move_actor(combat: Dict, actor_name: str, x: int, y: int, *,
     }
     combat.setdefault("log", []).append({"type": "move", **result})
     return result
+
+
+def prepare_attack(combat: Dict, attacker_name: str, target_name: str, *,
+                   attack_bonus: int | None = None, damage_expression: str | None = None,
+                   damage_bonus: int | None = None, attack_attribute: str = "strength",
+                   attack_range: int | None = None, enforce_turn: bool = False) -> Dict:
+    """Validate and lock in an attack without rolling any player-facing dice."""
+    attacker, target = _find_actor(combat, attacker_name), _find_actor(combat, target_name)
+    if attacker.get("defeated"):
+        raise ValueError(f"{attacker_name} is defeated and cannot attack")
+    if target.get("defeated"):
+        raise ValueError(f"{target_name} is already defeated")
+    if enforce_turn:
+        _require_turn(combat, attacker, attacker_name)
+        _require_primary_action(attacker, attacker_name)
+
+    distance = grid_distance(attacker, target)
+    maximum_range = int(attacker.get("attack_range", 1) if attack_range is None else attack_range)
+    if distance > maximum_range:
+        raise ValueError(
+            f"{target_name} is {distance} squares away; {attacker_name}'s attack range is {maximum_range}"
+        )
+
+    attrs = normalize_attributes(attacker.get("attributes"))
+    channels = character_sheet_channels(attrs, attacker.get("level", 1))
+    if attack_attribute == "dexterity":
+        stat_accuracy = int(channels["dexterity_attack_accuracy"])
+        default_damage_bonus = 0
+    elif attack_attribute == "magic":
+        stat_accuracy = int(channels["magic_attack_accuracy"])
+        default_damage_bonus = 0
+    else:
+        attack_attribute = "strength"
+        stat_accuracy = int(channels["strength_attack_accuracy"])
+        default_damage_bonus = int(channels["strength_damage_bonus"])
+
+    other_bonus = int(attacker.get("attack_bonus", 0) if attack_bonus is None else attack_bonus)
+    base_armor_class = int(target.get("armor_class", 10))
+    defense_ac_bonus = int(target.get("active_defense_ac_bonus", 0)) if target.get("defending") else 0
+    armor_class = base_armor_class + defense_ac_bonus
+    applied_damage_bonus = int(default_damage_bonus if damage_bonus is None else damage_bonus)
+    armor_stat_bonuses = attacker.get("armor_stat_bonuses") if isinstance(attacker.get("armor_stat_bonuses"), dict) else {}
+    armor_stat_amount = int(armor_stat_bonuses.get(attack_attribute, 0) or 0)
+
+    attacker["primary_action_used"] = True
+    attacker["attack_committed"] = True
+    pending = {
+        "kind": "attack",
+        "stage": "attack",
+        "purpose": f"Aim at {target_name}",
+        "expression": "1d20",
+        "dc": armor_class,
+        "modifier": stat_accuracy + other_bonus,
+        "modifier_breakdown": [
+            {"source": f"{attack_attribute.title()} {int(attrs.get(attack_attribute, 0))}", "value": stat_accuracy},
+            {"source": "Weapon / gear accuracy", "value": other_bonus},
+        ],
+        "dc_breakdown": [
+            {"source": "Target defense", "value": base_armor_class},
+            {"source": "Defending bonus", "value": defense_ac_bonus},
+        ],
+        "armor_bonus_note": (
+            f"Armor grants +{armor_stat_amount} {attack_attribute.title()}, already included in the stat above."
+            if armor_stat_amount else ""
+        ),
+        "attacker": attacker_name,
+        "target": target_name,
+        "attack_attribute": attack_attribute,
+        "distance": distance,
+        "attack_range": maximum_range,
+        "stat_accuracy_bonus": stat_accuracy,
+        "other_attack_bonus": other_bonus,
+        "base_armor_class": base_armor_class,
+        "defense_ac_bonus": defense_ac_bonus,
+        "damage_expression": damage_expression or str(attacker.get("damage", "1d4")),
+        "damage_bonus": applied_damage_bonus,
+        "critical_chance_percent": int(attacker.get("critical_chance_percent", channels["critical_chance_percent"])),
+    }
+    combat.setdefault("log", []).append({"type": "attack_declared", "attacker": attacker_name, "target": target_name})
+    return pending
+
+
+def resolve_prepared_attack_roll(combat: Dict, pending: Dict) -> Dict:
+    """Roll only the d20 portion of an attack and return its hit result."""
+    if pending.get("kind") != "attack" or pending.get("stage") != "attack":
+        raise ValueError("No attack roll is waiting.")
+    attacker = _find_actor(combat, str(pending.get("attacker") or ""))
+    target = _find_actor(combat, str(pending.get("target") or ""))
+    if target.get("defeated"):
+        raise ValueError(f"{target.get('name')} is already defeated")
+
+    attack = roll("1d20")
+    natural = int(attack["rolls"][0])
+    attack_bonus = int(pending.get("modifier", 0) or 0)
+    total = int(attack["total"]) + attack_bonus
+    armor_class = int(pending.get("dc", target.get("armor_class", 10)) or 10)
+    automatic_miss = natural == 1
+    automatic_hit = natural == 20
+    hit = False if automatic_miss else (True if automatic_hit else total >= armor_class)
+    crit_chance = int(pending.get("critical_chance_percent", 5) or 5)
+    crit_roll = int(roll("1d100")["total"]) if hit and not automatic_hit else None
+    critical = bool(automatic_hit or (hit and crit_roll is not None and crit_roll <= crit_chance))
+    accuracy_margin = max(0, total - armor_class) if hit else 0
+    accuracy_margin_damage_bonus = accuracy_margin // 3
+
+    result = {
+        "attacker": str(pending.get("attacker")),
+        "target": str(pending.get("target")),
+        "attack_attribute": str(pending.get("attack_attribute") or "strength"),
+        "distance": int(pending.get("distance", 0) or 0),
+        "attack_range": int(pending.get("attack_range", 1) or 1),
+        "d20": natural,
+        "stat_accuracy_bonus": int(pending.get("stat_accuracy_bonus", 0) or 0),
+        "other_attack_bonus": int(pending.get("other_attack_bonus", 0) or 0),
+        "attack_bonus": attack_bonus,
+        "attack_total": total,
+        "base_armor_class": int(pending.get("base_armor_class", armor_class) or armor_class),
+        "defense_ac_bonus": int(pending.get("defense_ac_bonus", 0) or 0),
+        "armor_class": armor_class,
+        "hit": hit,
+        "critical": critical,
+        "critical_roll": crit_roll,
+        "critical_chance_percent": crit_chance,
+        "accuracy_margin": accuracy_margin,
+        "accuracy_margin_damage_bonus": accuracy_margin_damage_bonus,
+        "primary_action_used": True,
+    }
+    combat.setdefault("log", []).append({"type": "attack_roll", **result})
+    return result
+
+
+def prepare_damage_roll(combat: Dict, pending: Dict, attack_result: Dict) -> Dict:
+    """Create the visible damage-roll card after a successful attack roll."""
+    target = _find_actor(combat, str(pending.get("target") or ""))
+    base_bonus = int(pending.get("damage_bonus", 0) or 0)
+    accuracy_bonus = int(attack_result.get("accuracy_margin_damage_bonus", 0) or 0)
+    resistance = int(target.get("physical_resistance_percent", 0) or 0)
+    armor_hp = int(target.get("armor", 0) or 0)
+    shield_hp = int(target.get("shield_hp", 0) or 0)
+    expression = str(pending.get("damage_expression") or "1d4")
+    protection_notes = []
+    if shield_hp:
+        protection_notes.append(f"Target has {shield_hp} Shield HP, which absorbs damage first")
+    if armor_hp:
+        protection_notes.append(f"Target has {armor_hp} Armor HP, which absorbs damage before HP")
+    if resistance:
+        protection_notes.append(f"Target resistance reduces remaining damage by {resistance}%")
+    return {
+        "kind": "damage",
+        "stage": "damage",
+        "purpose": f"Damage against {target.get('name')}",
+        "expression": expression,
+        "dc": None,
+        "modifier": base_bonus + accuracy_bonus,
+        "modifier_breakdown": [
+            {"source": "Stat damage bonus", "value": base_bonus},
+            {"source": "Accurate-hit bonus", "value": accuracy_bonus},
+        ],
+        "armor_bonus_note": ". ".join(protection_notes) + ("." if protection_notes else ""),
+        "attacker": str(pending.get("attacker")),
+        "target": str(pending.get("target")),
+        "damage_expression": expression,
+        "damage_bonus": base_bonus,
+        "accuracy_margin_damage_bonus": accuracy_bonus,
+        "physical_resistance_percent": resistance,
+        "target_armor_hp": armor_hp,
+        "target_shield_hp": shield_hp,
+        "critical": bool(attack_result.get("critical")),
+        "attack_result": deepcopy(attack_result),
+    }
+
+
+def resolve_prepared_damage_roll(combat: Dict, pending: Dict) -> Dict:
+    """Roll damage, apply it, and finish the stored attack result."""
+    if pending.get("kind") != "damage" or pending.get("stage") != "damage":
+        raise ValueError("No damage roll is waiting.")
+    target = _find_actor(combat, str(pending.get("target") or ""))
+    expression = str(pending.get("damage_expression") or pending.get("expression") or "1d4")
+    damage_rolls = [roll(expression)]
+    if bool(pending.get("critical")):
+        damage_rolls.append(roll(expression))
+    raw_damage = sum(int(item["total"]) for item in damage_rolls) + int(pending.get("modifier", 0) or 0)
+    resistance = int(pending.get("physical_resistance_percent", 0) or 0)
+    damage = max(0, round(raw_damage * (100 - resistance) / 100))
+    target["hp"] = max(0, int(target.get("hp", 0)) - damage)
+    target["defeated"] = target["hp"] <= 0
+
+    outcome = deepcopy(pending.get("attack_result")) if isinstance(pending.get("attack_result"), dict) else {}
+    outcome.update({
+        "damage_bonus": int(pending.get("damage_bonus", 0) or 0),
+        "accuracy_margin_damage_bonus": int(pending.get("accuracy_margin_damage_bonus", 0) or 0),
+        "raw_damage": raw_damage,
+        "physical_resistance_percent": resistance,
+        "damage": damage,
+        "damage_rolls": damage_rolls,
+        "target_hp": int(target.get("hp", 0)),
+        "target_max_hp": int(target.get("max_hp", target.get("hp", 0))),
+        "target_defeated": bool(target.get("defeated")),
+    })
+    combat.setdefault("log", []).append({"type": "damage_roll", **outcome})
+    _check_combat_end(combat)
+    return outcome
 
 
 def defend_actor(combat: Dict, actor_name: str, *, enforce_turn: bool = False) -> Dict:
@@ -312,6 +516,7 @@ def end_turn(combat: Dict) -> Dict:
             combat["turn_index"] = index
             actor["movement_used"] = 0
             actor["primary_action_used"] = False
+            actor["attack_committed"] = False
             actor["defending"] = False
             actor["active_defense_ac_bonus"] = 0
             regenerated = _regenerate_resource_for_turn(actor)
