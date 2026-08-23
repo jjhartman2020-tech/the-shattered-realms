@@ -25,7 +25,9 @@ LOOT / SEARCH / REWARD RULES
 - Generate the BASE/Common-stage mechanics appropriate for the player's current level and source. Python upgrades damage dice, Shield HP, Armor HP, healing, stat-bonus caps, and value after the rarity roll.
 - Whole armor sets may occasionally be rewards, caches, boss loot, or special finds, but ordinary drops should usually be individual pieces.
 - Equipment must remain balanced for the current stage of progression before rarity scaling. Do not pre-buff an item because you hope it becomes Rare/Epic/Legendary.
-- Currency or valuables can also be found when appropriate to the world, but never assume gold. Use the world's economy/currency (credits, dollars, gold, caps, crowns, etc.).
+- Currency can be found/rewarded when appropriate, but currency is NOT an inventory item. Use {\"type\":\"add_currency\",\"amount\":<positive integer>} so Python adds it to the persistent world-specific wallet. Never assume gold; narrate the currency defined by the world (credits, dollars, gold, caps, crowns, etc.).
+- Valuables that are physical objects may still be inventory items with sell_value; actual money goes to the wallet.
+- Shop purchases and sales are Python-authoritative through the merchant screen. Never silently grant an item, remove money, sell gear, or invent a transaction price in narration.
 - When loot is discovered, clearly state what was found and the important BASE mechanics. Keep the wording natural to the world.
 - Harvested materials should normally be materials/ingredients rather than magically becoming finished gear. Animals should drop plausible materials, food, trophies, or carried objects—not random swords or coins unless there is a story reason.
 - Quest rewards and boss drops may use higher loot_tier values, but only when the source genuinely deserves them.
