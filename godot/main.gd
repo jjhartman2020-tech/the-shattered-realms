@@ -34,8 +34,13 @@ var suggestions_box: VBoxContainer
 var roll_panel: PanelContainer
 var roll_title: Label
 var roll_details: Label
+var roll_number_label: Label
 var roll_button: Button
 var pending_roll: Dictionary = {}
+var roll_animation_running := false
+var roll_animation_elapsed := 0.0
+var roll_animation_min := 1
+var roll_animation_max := 20
 var action_input: LineEdit
 var send_button: Button
 var context_title: Label
@@ -48,6 +53,15 @@ func _ready() -> void:
 	add_child(http)
 	http.request_completed.connect(_on_request_completed)
 	_load_session()
+
+
+func _process(delta: float) -> void:
+	if not roll_animation_running or not is_instance_valid(roll_number_label):
+		return
+	roll_animation_elapsed += delta
+	if roll_animation_elapsed >= 0.045:
+		roll_animation_elapsed = 0.0
+		roll_number_label.text = str(randi_range(roll_animation_min, roll_animation_max))
 
 
 func _build_ui() -> void:
@@ -219,6 +233,14 @@ func _build_story_panel() -> PanelContainer:
 	roll_details.add_theme_font_size_override("font_size", 14)
 	roll_details.add_theme_color_override("font_color", TEXT)
 	roll_box.add_child(roll_details)
+	roll_number_label = Label.new()
+	roll_number_label.text = "20"
+	roll_number_label.visible = false
+	roll_number_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	roll_number_label.custom_minimum_size.y = 74
+	roll_number_label.add_theme_font_size_override("font_size", 58)
+	roll_number_label.add_theme_color_override("font_color", ACCENT_HOVER)
+	roll_box.add_child(roll_number_label)
 	roll_button = _make_button("ROLL DICE", true)
 	roll_button.custom_minimum_size.y = 44
 	roll_button.pressed.connect(_roll_pending)
@@ -382,6 +404,12 @@ func _roll_pending() -> void:
 	busy = true
 	_set_inputs_enabled(false)
 	roll_button.disabled = true
+	_set_roll_animation_range(str(pending_roll.get("expression", "1d20")), bool(pending_roll.get("critical", false)))
+	roll_number_label.visible = true
+	roll_number_label.text = str(randi_range(roll_animation_min, roll_animation_max))
+	roll_number_label.add_theme_color_override("font_color", ACCENT_HOVER)
+	roll_animation_elapsed = 0.0
+	roll_animation_running = true
 	request_mode = "roll"
 	connection_label.text = "Rolling..."
 	connection_label.add_theme_color_override("font_color", MUTED)
@@ -389,13 +417,16 @@ func _roll_pending() -> void:
 	var err := http.request(API_BASE + "/roll", headers, HTTPClient.METHOD_POST, "{}")
 	if err != OK:
 		busy = false
+		roll_animation_running = false
+		roll_number_label.visible = false
 		roll_button.disabled = false
 		_set_connection_error("Could not roll dice")
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		busy = false
+		_stop_roll_animation()
 		_set_inputs_enabled(pending_roll.is_empty())
 		if is_instance_valid(roll_button):
 			roll_button.disabled = false
@@ -403,15 +434,24 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not parsed is Dictionary:
+		busy = false
+		_stop_roll_animation()
+		_set_inputs_enabled(pending_roll.is_empty())
 		_set_connection_error("Backend returned invalid data")
 		return
 	var payload: Dictionary = parsed
 	if not payload.get("ok", false):
+		busy = false
+		_stop_roll_animation()
 		_set_inputs_enabled(pending_roll.is_empty())
 		if is_instance_valid(roll_button):
 			roll_button.disabled = false
 		_set_connection_error(str(payload.get("error", "Unknown backend error")))
 		return
+	if request_mode == "roll":
+		var final_roll: int = _extract_authoritative_roll(payload)
+		await _settle_roll_animation(final_roll)
+	busy = false
 	connection_label.text = "● BACKEND CONNECTED"
 	connection_label.add_theme_color_override("font_color", SUCCESS)
 	latest_state = payload.get("state", {}) if payload.get("state", {}) is Dictionary else {}
@@ -431,6 +471,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 func _render_pending_roll(raw) -> void:
 	pending_roll = raw.duplicate(true) if raw is Dictionary else {}
+	_stop_roll_animation()
 	if pending_roll.is_empty():
 		roll_panel.visible = false
 		roll_button.disabled = false
@@ -441,7 +482,7 @@ func _render_pending_roll(raw) -> void:
 	var purpose := str(pending_roll.get("purpose", "Resolve the action"))
 	var modifier := int(pending_roll.get("modifier", 0))
 	var dc_value = pending_roll.get("dc")
-	roll_title.text = "DAMAGE ROLL" if kind == "damage" else ("ATTACK ROLL" if kind == "attack" else "CHECK ROLL")
+	roll_title.text = "DAMAGE ROLL" if kind == "damage" else ("ABILITY ATTACK ROLL" if kind == "ability_attack" else ("ATTACK ROLL" if kind == "attack" else "CHECK ROLL"))
 	var lines: Array[String] = ["Rolling for: " + purpose]
 	var roll_line := "Roll: %s %s" % [expression, _signed(modifier)]
 	if dc_value != null:
@@ -467,6 +508,71 @@ func _render_pending_roll(raw) -> void:
 	roll_button.text = ("ROLL %s DAMAGE" % expression.to_upper()) if kind == "damage" else ("ROLL %s" % expression.to_upper())
 	roll_button.disabled = false
 	roll_panel.visible = true
+
+
+func _set_roll_animation_range(expression: String, critical: bool) -> void:
+	var clean: String = expression.to_lower().replace(" ", "")
+	var dice_position: int = clean.find("d")
+	var dice_count: int = 1
+	var dice_sides: int = 20
+	if dice_position >= 0:
+		var count_text: String = clean.substr(0, dice_position)
+		if count_text.is_valid_int():
+			dice_count = max(1, int(count_text))
+		var side_text: String = ""
+		for index in range(dice_position + 1, clean.length()):
+			var character: String = clean.substr(index, 1)
+			if not character.is_valid_int():
+				break
+			side_text += character
+		if side_text.is_valid_int():
+			dice_sides = max(2, int(side_text))
+	if critical:
+		dice_count *= 2
+	roll_animation_min = dice_count
+	roll_animation_max = dice_count * dice_sides
+
+
+func _extract_authoritative_roll(payload: Dictionary) -> int:
+	var waiting_kind: String = str(pending_roll.get("kind", "check"))
+	var roll_result = payload.get("roll", {})
+	if waiting_kind == "check" and roll_result is Dictionary:
+		return int(roll_result.get("base_total", roll_result.get("total", roll_animation_min)))
+	if waiting_kind == "attack" or waiting_kind == "ability_attack":
+		var events = payload.get("combat_results", [])
+		if events is Array:
+			for event in events:
+				if event is Dictionary and event.get("d20") != null:
+					return int(event.get("d20"))
+		if roll_result is Dictionary and roll_result.get("d20") != null:
+			return int(roll_result.get("d20"))
+	if waiting_kind == "damage" and roll_result is Dictionary:
+		var damage_rolls = roll_result.get("damage_rolls", [])
+		if damage_rolls is Array and not damage_rolls.is_empty():
+			var dice_total: int = 0
+			for die_result in damage_rolls:
+				if die_result is Dictionary:
+					dice_total += int(die_result.get("total", 0))
+			return max(roll_animation_min, dice_total)
+	return roll_animation_min
+
+
+func _settle_roll_animation(final_value: int) -> void:
+	roll_animation_running = false
+	var delays: Array[float] = [0.06, 0.09, 0.14, 0.21, 0.32]
+	for delay in delays:
+		roll_number_label.text = str(randi_range(roll_animation_min, roll_animation_max))
+		await get_tree().create_timer(delay).timeout
+	roll_number_label.text = str(final_value)
+	roll_number_label.add_theme_color_override("font_color", SUCCESS)
+	await get_tree().create_timer(0.8).timeout
+
+
+func _stop_roll_animation() -> void:
+	roll_animation_running = false
+	if is_instance_valid(roll_number_label):
+		roll_number_label.visible = false
+		roll_number_label.add_theme_color_override("font_color", ACCENT_HOVER)
 
 
 func _signed(value: int) -> String:
