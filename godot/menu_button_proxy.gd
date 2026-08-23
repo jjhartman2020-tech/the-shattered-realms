@@ -34,17 +34,13 @@ func _ready() -> void:
 
 	overlay = get_parent().get_node_or_null("MenuOverlay")
 	pressed.connect(_open_menu)
-	# Listen at the viewport input level too. This makes the menu reliable even
-	# when Godot's embedded-game viewport or another full-screen Control consumes
-	# the normal GUI button event before it reaches this Button.
 	set_process_input(true)
 
 
 func _process(_delta: float) -> void:
 	if overlay == null:
 		overlay = get_parent().get_node_or_null("MenuOverlay")
-	if overlay != null and overlay.backdrop != null:
-		visible = not overlay.backdrop.visible
+	visible = overlay == null or not overlay.visible
 
 
 func _input(event: InputEvent) -> void:
@@ -52,10 +48,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
-		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
-			if get_global_rect().has_point(mouse_event.position):
-				_open_menu()
-				get_viewport().set_input_as_handled()
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed and get_global_rect().has_point(mouse_event.position):
+			_open_menu()
+			get_viewport().set_input_as_handled()
 	elif event is InputEventKey:
 		var key_event := event as InputEventKey
 		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_M:
@@ -66,9 +61,5 @@ func _input(event: InputEvent) -> void:
 func _open_menu() -> void:
 	if overlay == null:
 		overlay = get_parent().get_node_or_null("MenuOverlay")
-	if overlay == null:
-		return
-	# The overlay intentionally ignores mouse input while closed so it does not
-	# block the main game. Enable it before opening the modal menu.
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	overlay._open_menu()
+	if overlay != null:
+		overlay._open_menu()
