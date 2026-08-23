@@ -7,6 +7,7 @@ from typing import Dict, List
 
 from .armor import ARMOR_SLOTS, effective_movement, normalize_armor_piece, sync_armor_summary
 from .dice import normalize_damage_expression
+from .economy import ensure_wallet, format_money
 
 RARITY_ORDER = {"common": 0, "uncommon": 1, "rare": 2, "epic": 3, "legendary": 4}
 RARITY_VALUE_MULTIPLIER = {"common": 1.0, "uncommon": 1.25, "rare": 1.6, "epic": 2.2, "legendary": 3.0}
@@ -62,20 +63,7 @@ def ensure_inventory_sell_values(player: Dict) -> bool:
 
 
 def _currency_label(game_master, amount: int) -> str:
-    """Render money in the currency native to the confirmed campaign world."""
-    world = game_master.state.data.get("world_profile", {})
-    economy = str(world.get("economy") or "").strip()
-    genre = str(world.get("genre") or "").lower()
-    tech = str(world.get("technology_level") or "").lower()
-    text = f"{economy} {genre} {tech}".lower()
-    if any(word in text for word in ("credit", "credits")): unit = "credit" if amount == 1 else "credits"; return f"{amount} {unit}"
-    if any(word in text for word in ("dollar", "dollars", "usd", "$", "modern", "contemporary")): return f"${amount}"
-    if any(word in text for word in ("gold", "coin", "coins", "medieval", "fantasy")): return f"{amount} gold"
-    match = re.search(r"(?:currency|uses?|paid in|money)\s*(?:is|:|=)?\s*([A-Za-z][A-Za-z -]{1,24})", economy, re.IGNORECASE)
-    if match:
-        unit = match.group(1).strip().rstrip(".,;")
-        return f"{amount} {unit}"
-    return f"{amount} currency"
+    return format_money(amount, game_master.state.data.get("world_profile", {}))
 
 
 def _same_item(a: Dict | None, b: Dict | None) -> bool:
@@ -172,9 +160,12 @@ def show_inventory(game_master) -> None:
     player = game_master.state.data.get("player", {})
     changed = ensure_inventory_sell_values(player)
     changed = _organize_inventory(player) or changed
+    wallet = ensure_wallet(game_master, grant_starting_funds=True)
     if changed: game_master.state.save()
     inventory = player.get("inventory") if isinstance(player.get("inventory"), list) else []
-    print("\n" + "=" * 52); print("INVENTORY"); print("=" * 52); show_equipment(player)
+    print("\n" + "=" * 52); print("INVENTORY"); print("=" * 52)
+    print(f"💰 Balance: {format_money(wallet.get('amount', 0), wallet)}")
+    show_equipment(player)
     if not inventory: print("\nYour inventory is empty."); return
 
     current_category = None
@@ -195,7 +186,7 @@ def show_inventory(game_master) -> None:
         rarity = _item_rarity(item).title()
         print(f"  {index}. {item.get('name','Item')}{quantity_text} [{rarity}] ({_item_type(item).title()}){_equipped_label(player, item)}{desc_text}")
         print(f"     {_item_mechanics(item)} | {sell_text}")
-    print("\nType 'equip' to change your equipped weapon, shield, or armor piece.")
+    print("\nType 'equip' to change your equipped weapon, shield, or armor piece. Type 'shop' when visiting a merchant.")
 
 
 def _combat_active(game_master) -> bool:
