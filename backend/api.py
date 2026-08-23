@@ -33,8 +33,10 @@ from backend.game.abilities import prepare_ability_roll, resolve_ability
 from backend.game.ability_learning import available_to_learn, generate_ability_choices, learn_ability
 from backend.game.character_hub import (
     cached_character_portrait,
+    clear_character_portrait_cache,
     equip_armor_from_inventory,
     generate_character_portrait,
+    load_character_portrait,
     spend_stat_point,
     unequip_armor_slot,
 )
@@ -72,10 +74,7 @@ def _clear_creation_session() -> None:
 
 def _clear_character_hub_session() -> None:
     CHARACTER_HUB_SESSION["ability_choices"] = []
-    try:
-        PORTRAIT_PATH.unlink(missing_ok=True)
-    except OSError:
-        pass
+    clear_character_portrait_cache(PORTRAIT_PATH)
 
 
 def _json_safe(value: Any) -> Any:
@@ -696,9 +695,24 @@ def _character_hub_action(payload: Dict, action_type: str) -> Dict:
         # Loading cached art is read-only and should never fail just because an
         # older save is missing the character-complete migration flag.
         if action_type == "load_portrait":
-            encoded = cached_character_portrait(PORTRAIT_PATH)
+            saved_player = GAME_MASTER.state.data.get("player")
+            if not isinstance(saved_player, dict) or not saved_player.get("character_creation_complete"):
+                encoded = cached_character_portrait(PORTRAIT_PATH)
+                return _character_hub_response(
+                    "", portrait_base64=encoded, portrait_available=bool(encoded),
+                    portrait_stale=False, portrait_cached=False, portrait_format="png",
+                )
+            portrait = load_character_portrait(GAME_MASTER, PORTRAIT_PATH)
+            if portrait.get("portrait_cached"):
+                message = "Restored this saved outfit picture instantly."
+            elif portrait.get("portrait_stale") and portrait.get("portrait_available"):
+                message = "Armor changed. Finish your loadout, then update the outfit art once."
+            elif portrait.get("portrait_stale"):
+                message = "Finish your loadout, then generate the character art once."
+            else:
+                message = ""
             return _character_hub_response(
-                "", portrait_base64=encoded, portrait_available=bool(encoded), portrait_format="png"
+                message, portrait_format="png", **portrait
             )
 
         player = GAME_MASTER.state.data.get("player")
@@ -710,8 +724,7 @@ def _character_hub_action(payload: Dict, action_type: str) -> Dict:
                 encoded = generate_character_portrait(
                     GAME_MASTER,
                     PORTRAIT_PATH,
-                    changed_slot=str(payload.get("changed_slot") or ""),
-                    change_type=str(payload.get("change_type") or ""),
+                    force_refresh=bool(payload.get("force_refresh", False)),
                 )
             except ValueError:
                 raise
@@ -721,6 +734,7 @@ def _character_hub_action(payload: Dict, action_type: str) -> Dict:
                 "Character art generated from your current appearance and armor.",
                 portrait_base64=encoded,
                 portrait_available=True,
+                portrait_stale=False,
                 portrait_format="png",
             )
 
