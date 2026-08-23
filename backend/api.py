@@ -707,7 +707,12 @@ def _character_hub_action(payload: Dict, action_type: str) -> Dict:
 
         if action_type == "generate_portrait":
             try:
-                encoded = generate_character_portrait(GAME_MASTER, PORTRAIT_PATH)
+                encoded = generate_character_portrait(
+                    GAME_MASTER,
+                    PORTRAIT_PATH,
+                    changed_slot=str(payload.get("changed_slot") or ""),
+                    change_type=str(payload.get("change_type") or ""),
+                )
             except ValueError:
                 raise
             except Exception as exc:
