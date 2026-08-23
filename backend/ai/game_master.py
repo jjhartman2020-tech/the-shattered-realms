@@ -7,7 +7,7 @@ from .context import ContextBuilder
 from .memory import CampaignMemory
 from .provider import provider_from_environment
 from .rules import RuleLibrary
-from backend.game.abilities import resolve_ability
+from backend.game.abilities import prepare_ability_roll, resolve_ability
 from backend.game.armor import apply_armor_stat_bonuses, armor_stat_bonuses
 from backend.game.attributes import SKILL_ATTRIBUTE, attribute_check_bonus, build_combatant, normalize_attributes
 from backend.game.checks import DIFFICULTY_DCS, resolve_check
@@ -145,8 +145,23 @@ class GameMaster:
                         elif request_type == "ability":
                             ability_name = str(combat_request.get("ability") or "").strip()
                             target = str(combat_request.get("target") or "").strip() or None
-                            ability_result = resolve_ability(active_combat, player_name, ability_name, target, enforce_turn=True)
-                            combat_results.append({"type": "player_ability", **ability_result})
+                            pending_roll = prepare_ability_roll(
+                                active_combat, player_name, ability_name, target, enforce_turn=True,
+                            )
+                            if pending_roll is not None:
+                                pending_roll["action"] = action
+                                combat_results.append({
+                                    "type": "player_ability_declared",
+                                    "actor": player_name,
+                                    "ability": ability_name,
+                                    "target": target,
+                                    "attack_attribute": pending_roll.get("attack_attribute"),
+                                    "turn_locked": True,
+                                })
+                                self.state.data["pending_roll"] = deepcopy(pending_roll)
+                            else:
+                                ability_result = resolve_ability(active_combat, player_name, ability_name, target, enforce_turn=True)
+                                combat_results.append({"type": "player_ability", **ability_result})
                         elif request_type == "defend":
                             defense = defend_actor(active_combat, player_name, enforce_turn=True)
                             combat_results.append({"type": "player_defend", **defense})
@@ -175,8 +190,9 @@ class GameMaster:
             result = narrated
 
         elif pending_roll is not None:
+            roll_name = str(pending_roll.get("ability") or "Attack")
             result = {
-                "narration": f"Attack declared against {pending_roll.get('target')}. Roll to see if it hits.",
+                "narration": f"{roll_name} is aimed at {pending_roll.get('target')}. Roll to see if it hits.",
                 "suggested_actions": [],
                 "combat_request": None,
                 "combat": active_combat,
@@ -290,16 +306,19 @@ class GameMaster:
             return {"narration": "The battle ended before that roll could be made.", "suggested_actions": [], "pending_roll": {}, "state": self.state.snapshot()}
 
         events: List[Dict] = []
-        if kind == "attack":
+        if kind in {"attack", "ability_attack"}:
             attack_result = resolve_prepared_attack_roll(combat, pending)
-            events.append({"type": "player_attack_roll", **attack_result})
-            if attack_result.get("hit"):
+            event_type = "player_ability_attack_roll" if kind == "ability_attack" else "player_attack_roll"
+            events.append({"type": event_type, **attack_result})
+            damage_expression = str(pending.get("damage_expression") or "0").lower()
+            if attack_result.get("hit") and damage_expression not in {"", "0", "none"}:
                 damage_pending = prepare_damage_roll(combat, pending, attack_result)
                 damage_pending["action"] = action
                 self.state.data["pending_roll"] = deepcopy(damage_pending)
                 self._persist_combat(combat)
+                ability_text = f" with {pending.get('ability')}" if kind == "ability_attack" else ""
                 return {
-                    "narration": f"Roll {attack_result.get('d20')} + {attack_result.get('attack_bonus')} = {attack_result.get('attack_total')}: hit. Now roll damage.",
+                    "narration": f"Roll {attack_result.get('d20')} + {attack_result.get('attack_bonus')} = {attack_result.get('attack_total')}: hit{ability_text}. Now roll damage.",
                     "suggested_actions": [], "combat": deepcopy(combat),
                     "combat_results": events, "requires_roll": True,
                     "roll": deepcopy(damage_pending), "pending_roll": deepcopy(damage_pending),
@@ -339,6 +358,11 @@ class GameMaster:
             hp_damage = int(attack_result.get("hp_damage", attack_result.get("damage", 0)) or 0)
             if shield_absorbed or armor_absorbed:
                 mechanical_summary += f" Shield absorbed {shield_absorbed}; armor absorbed {armor_absorbed}; HP lost {hp_damage}."
+        elif attack_result.get("hit"):
+            mechanical_summary = (
+                f"ATTACK RESULT: {attack_result.get('d20')} {int(attack_result.get('attack_bonus', 0)):+d} "
+                f"= {attack_result.get('attack_total')} vs DC {attack_result.get('armor_class')} — HIT. Turn ended."
+            )
         else:
             mechanical_summary = (
                 f"ATTACK RESULT: {attack_result.get('d20')} {int(attack_result.get('attack_bonus', 0)):+d} "
