@@ -693,15 +693,17 @@ def _character_hub_response(message: str = "", **extra) -> Dict:
 
 def _character_hub_action(payload: Dict, action_type: str) -> Dict:
     try:
-        player = GAME_MASTER.state.data.get("player")
-        if not isinstance(player, dict) or not player.get("character_creation_complete"):
-            raise ValueError("Finish character creation before opening the Character Hub.")
-
+        # Loading cached art is read-only and should never fail just because an
+        # older save is missing the character-complete migration flag.
         if action_type == "load_portrait":
             encoded = cached_character_portrait(PORTRAIT_PATH)
             return _character_hub_response(
                 "", portrait_base64=encoded, portrait_available=bool(encoded), portrait_format="png"
             )
+
+        player = GAME_MASTER.state.data.get("player")
+        if not isinstance(player, dict) or not player.get("character_creation_complete"):
+            raise ValueError("Finish character creation before opening the Character Hub.")
 
         if action_type == "generate_portrait":
             try:
