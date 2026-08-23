@@ -16,6 +16,8 @@ const PLAYER_COLOR := Color("#f2d36b")
 const ALLY_COLOR := Color("#65c3a0")
 const ENEMY_COLOR := Color("#dc675f")
 const MOVE_COLOR := Color(0.28, 0.86, 0.73, 0.3)
+const HOLD_FIRST_DELAY := 0.20
+const HOLD_STEP_DELAY := 0.115
 
 var main_controller: Control
 var http: HTTPRequest
@@ -53,6 +55,8 @@ var area_render_cache: Dictionary = {}
 var pending_step_direction := Vector2i.ZERO
 var player_position_initialized: bool = false
 var loaded_world_signature: String = ""
+var held_direction := Vector2i.ZERO
+var held_move_timer: float = 0.0
 
 var title_label: Label
 var subtitle_label: Label
@@ -67,6 +71,8 @@ var suggestion_buttons: Array[Button] = []
 var character_button: Button
 var character_panel: PanelContainer
 var character_text: RichTextLabel
+var character_section: String = "stats"
+var character_tab_buttons: Array[Button] = []
 var battle_panel: PanelContainer
 var battle_actions: VBoxContainer
 var status_label: Label
@@ -91,9 +97,51 @@ func bind_main(value: Control) -> void:
 	main_controller = value
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if moving:
 		queue_redraw()
+	_process_held_movement(delta)
+
+
+func _process_held_movement(delta: float) -> void:
+	if not visible or mode != "explore" or busy or character_panel.visible:
+		held_direction = Vector2i.ZERO
+		held_move_timer = 0.0
+		return
+	var focused: Control = get_viewport().gui_get_focus_owner()
+	if focused is LineEdit or focused is TextEdit:
+		held_direction = Vector2i.ZERO
+		held_move_timer = 0.0
+		return
+	var direction: Vector2i = _held_movement_direction()
+	if direction == Vector2i.ZERO:
+		held_direction = Vector2i.ZERO
+		held_move_timer = 0.0
+		return
+	if direction != held_direction:
+		held_direction = direction
+		held_move_timer = HOLD_FIRST_DELAY
+		if not moving:
+			_hide_dialogue()
+			_move_player(direction)
+		return
+	held_move_timer = maxf(0.0, held_move_timer - delta)
+	if held_move_timer <= 0.0 and not moving:
+		held_move_timer = HOLD_STEP_DELAY
+		_hide_dialogue()
+		_move_player(direction)
+
+
+func _held_movement_direction() -> Vector2i:
+	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
+		return Vector2i(0, -1)
+	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
+		return Vector2i(0, 1)
+	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
+		return Vector2i(-1, 0)
+	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
+		return Vector2i(1, 0)
+	return Vector2i.ZERO
 
 
 func show_from_payload(payload: Dictionary = {}) -> void:
@@ -164,7 +212,10 @@ func _build_interface() -> void:
 	character_button.offset_top = 18.0
 	character_button.offset_right = -156.0
 	character_button.offset_bottom = 58.0
-	character_button.z_index = 110
+	character_button.z_index = 2000
+	character_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	character_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	character_button.tooltip_text = "Open stats, inventory, gear, and abilities (C)"
 	add_child(character_button)
 
 	character_panel = PanelContainer.new()
@@ -173,8 +224,9 @@ func _build_interface() -> void:
 	character_panel.offset_top = 78.0
 	character_panel.offset_right = -24.0
 	character_panel.offset_bottom = -24.0
-	character_panel.z_index = 105
+	character_panel.z_index = 1990
 	character_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	character_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	character_panel.add_theme_stylebox_override("panel", _panel_style(Color("#182a31"), _palette_color("accent"), 3))
 	add_child(character_panel)
 	var sheet_margin := MarginContainer.new()
@@ -183,14 +235,39 @@ func _build_interface() -> void:
 	sheet_margin.add_theme_constant_override("margin_right", 18)
 	sheet_margin.add_theme_constant_override("margin_bottom", 16)
 	character_panel.add_child(sheet_margin)
+	var sheet_stack := VBoxContainer.new()
+	sheet_stack.add_theme_constant_override("separation", 10)
+	sheet_margin.add_child(sheet_stack)
+	var sheet_heading := Label.new()
+	sheet_heading.text = "CHARACTER"
+	sheet_heading.add_theme_font_size_override("font_size", 24)
+	sheet_heading.add_theme_color_override("font_color", INK)
+	sheet_stack.add_child(sheet_heading)
+	var tab_row := HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", 6)
+	sheet_stack.add_child(tab_row)
+	var tab_sections: Array[String] = ["stats", "inventory", "equipment", "abilities"]
+	var tab_labels: Array[String] = ["STATS", "INVENTORY", "GEAR", "ABILITIES"]
+	for index in range(tab_sections.size()):
+		var tab_button := _action_button(tab_labels[index], _set_character_section.bind(tab_sections[index]))
+		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab_button.custom_minimum_size.y = 38
+		tab_button.set_meta("section", tab_sections[index])
+		tab_button.set_meta("base_label", tab_labels[index])
+		character_tab_buttons.append(tab_button)
+		tab_row.add_child(tab_button)
 	character_text = RichTextLabel.new()
 	character_text.bbcode_enabled = true
 	character_text.scroll_active = true
 	character_text.fit_content = false
+	character_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	character_text.add_theme_font_size_override("normal_font_size", 16)
 	character_text.add_theme_font_size_override("bold_font_size", 18)
 	character_text.add_theme_color_override("default_color", INK)
-	sheet_margin.add_child(character_text)
+	sheet_stack.add_child(character_text)
+	var close_sheet_button := _action_button("CLOSE", _toggle_character_panel)
+	close_sheet_button.custom_minimum_size.y = 42
+	sheet_stack.add_child(close_sheet_button)
 	character_panel.visible = false
 
 	dialogue_panel = PanelContainer.new()
@@ -814,16 +891,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if key_event.keycode in [KEY_ESCAPE, KEY_C]:
 				_toggle_character_panel()
 			return
-		var direction := Vector2i.ZERO
 		match key_event.keycode:
-			KEY_W, KEY_UP:
-				direction = Vector2i(0, -1)
-			KEY_S, KEY_DOWN:
-				direction = Vector2i(0, 1)
-			KEY_A, KEY_LEFT:
-				direction = Vector2i(-1, 0)
-			KEY_D, KEY_RIGHT:
-				direction = Vector2i(1, 0)
 			KEY_E, KEY_SPACE:
 				if dialogue_panel.visible and not dialogue_choices.visible:
 					_hide_dialogue()
@@ -833,9 +901,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				_hide_dialogue()
 			KEY_C:
 				_toggle_character_panel()
-		if direction != Vector2i.ZERO:
-			_hide_dialogue()
-			_move_player(direction)
 	else:
 		if key_event.keycode == KEY_ESCAPE:
 			action_mode = ""
@@ -1228,73 +1293,102 @@ func _toggle_character_panel() -> void:
 		_refresh_character_sheet()
 
 
+func _set_character_section(section: String) -> void:
+	if section not in ["stats", "inventory", "equipment", "abilities"]:
+		return
+	character_section = section
+	_refresh_character_sheet()
+
+
 func _refresh_character_sheet() -> void:
 	if character_text == null:
 		return
 	var player: Dictionary = game_state.get("player", {}) if game_state.get("player") is Dictionary else {}
 	var stats: Dictionary = player.get("stats", {}) if player.get("stats") is Dictionary else {}
+	for button in character_tab_buttons:
+		var is_selected: bool = str(button.get_meta("section", "")) == character_section
+		button.disabled = false
+		button.text = ("• " if is_selected else "") + str(button.get_meta("base_label", button.text))
 	var lines: Array[String] = []
 	lines.append("[font_size=24][b]%s[/b][/font_size]" % _sheet_safe(str(player.get("name", "Traveler"))))
 	lines.append("%s  •  Level %d" % [_sheet_safe(str(player.get("class", "Unassigned"))), int(player.get("level", 1))])
 	lines.append("")
-	lines.append("[b]VITALS[/b]")
-	lines.append("HP  %d / %d" % [int(player.get("hp", 0)), int(player.get("max_hp", 0))])
-	lines.append("Armor  %d / %d  •  Weight %d" % [int(player.get("armor", 0)), int(player.get("max_armor", 0)), int(player.get("armor_weight", 0))])
-	lines.append("%s  %d / %d" % [_sheet_safe(str(player.get("resource_name", "Resource"))), int(player.get("resource", player.get("mana", 0))), int(player.get("max_resource", player.get("max_mana", 0)))])
-	lines.append("AC %d  •  Movement %d  •  Initiative %d" % [int(player.get("armor_class", 10)), int(player.get("movement", 0)), int(player.get("initiative_bonus", 0))])
-	lines.append("XP %d / %d  •  SP %d  •  AP %d" % [int(player.get("xp_orbs", 0)), int(player.get("xp_to_next_level", 0)), int(player.get("skill_points_unspent", 0)), int(player.get("ability_points", 0))])
-	lines.append("Money  " + _sheet_money(player))
-	lines.append("")
-	lines.append("[b]CORE STATS[/b]")
-	var stat_names: Array[String] = ["health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"]
-	for index in range(0, stat_names.size(), 2):
-		var left_name: String = stat_names[index]
-		var stat_line: String = "%s %d" % [left_name.capitalize(), int(stats.get(left_name, 0))]
-		if index + 1 < stat_names.size():
-			var right_name: String = stat_names[index + 1]
-			stat_line += "     %s %d" % [right_name.capitalize(), int(stats.get(right_name, 0))]
-		lines.append(stat_line)
-	lines.append("")
-	lines.append("[b]EQUIPMENT & ARMOR[/b]")
-	var weapon = player.get("equipped_weapon", {})
-	if weapon is Dictionary and not weapon.is_empty():
-		lines.append("Weapon: " + _sheet_safe(str(weapon.get("name", "Equipped weapon"))))
-	elif not str(weapon).strip_edges().is_empty() and str(weapon) != "{}":
-		lines.append("Weapon: " + _sheet_safe(str(weapon)))
-	else:
-		lines.append("Weapon: None equipped")
-	var armor_name: String = str(player.get("armor_set_name", "Mixed set"))
-	lines.append("Armor set: " + _sheet_safe(armor_name))
-	var equipped_armor: Dictionary = player.get("equipped_armor", {}) if player.get("equipped_armor") is Dictionary else {}
-	for slot in ["helmet", "breastplate", "pants", "gloves", "boots"]:
-		var piece: Dictionary = equipped_armor.get(slot, {}) if equipped_armor.get(slot) is Dictionary else {}
-		if piece.is_empty():
-			continue
-		lines.append("• %s: %s — %d/%d Armor, Weight %d" % [str(slot).capitalize(), _sheet_safe(str(piece.get("name", slot))), int(piece.get("armor_hp", 0)), int(piece.get("max_armor_hp", piece.get("armor_hp", 0))), int(piece.get("weight", 0))])
-	lines.append("")
-	lines.append("[b]EQUIPPED ABILITIES[/b]")
-	var abilities: Array = player.get("equipped_abilities", []) if player.get("equipped_abilities") is Array else []
-	if abilities.is_empty():
-		lines.append("None equipped")
-	else:
-		for ability_value in abilities:
-			if ability_value is Dictionary:
-				lines.append("• %s — Cost %d" % [_sheet_safe(str(ability_value.get("name", "Ability"))), int(ability_value.get("resource_cost", 0))])
-	lines.append("")
-	lines.append("[b]INVENTORY[/b]")
-	var inventory: Array = player.get("inventory", []) if player.get("inventory") is Array else []
-	if inventory.is_empty():
-		lines.append("Inventory is empty.")
-	else:
-		for item_value in inventory:
-			if not item_value is Dictionary:
-				continue
-			var item: Dictionary = item_value
-			var quantity: int = maxi(1, int(item.get("quantity", 1)))
-			var rarity: String = str(item.get("rarity", "common")).capitalize()
-			var quantity_text: String = " x%d" % quantity if quantity > 1 else ""
-			lines.append("• %s%s  [%s]" % [_sheet_safe(str(item.get("name", "Item"))), quantity_text, rarity])
+	match character_section:
+		"inventory":
+			lines.append("[b]INVENTORY[/b]")
+			lines.append("Money: " + _sheet_money(player))
+			lines.append("")
+			var inventory: Array = player.get("inventory", []) if player.get("inventory") is Array else []
+			if inventory.is_empty():
+				lines.append("Inventory is empty.")
+			else:
+				for item_value in inventory:
+					if not item_value is Dictionary:
+						continue
+					var item: Dictionary = item_value
+					var quantity: int = maxi(1, int(item.get("quantity", 1)))
+					var rarity: String = str(item.get("rarity", "common")).capitalize()
+					var quantity_text: String = " x%d" % quantity if quantity > 1 else ""
+					lines.append("[b]• %s%s[/b]  [%s]" % [_sheet_safe(str(item.get("name", "Item"))), quantity_text, rarity])
+					var description: String = str(item.get("description", "")).strip_edges()
+					if not description.is_empty():
+						lines.append("  " + _sheet_safe(description))
+		"equipment":
+			lines.append("[b]EQUIPMENT & ARMOR[/b]")
+			lines.append("Armor %d/%d  •  Weight %d  •  Movement %d" % [int(player.get("armor", 0)), int(player.get("max_armor", 0)), int(player.get("armor_weight", 0)), int(player.get("movement", 0))])
+			var weapon = player.get("equipped_weapon", {})
+			if weapon is Dictionary and not weapon.is_empty():
+				lines.append("Weapon: " + _sheet_safe(str(weapon.get("name", "Equipped weapon"))))
+			elif not str(weapon).strip_edges().is_empty() and str(weapon) != "{}" and str(weapon) != "<null>":
+				lines.append("Weapon: " + _sheet_safe(str(weapon)))
+			else:
+				lines.append("Weapon: None equipped")
+			lines.append("Armor set: " + _sheet_safe(str(player.get("armor_set_name", "Mixed set"))))
+			var equipped_armor: Dictionary = player.get("equipped_armor", {}) if player.get("equipped_armor") is Dictionary else {}
+			for slot in ["helmet", "breastplate", "pants", "gloves", "boots"]:
+				var piece: Dictionary = equipped_armor.get(slot, {}) if equipped_armor.get(slot) is Dictionary else {}
+				if piece.is_empty():
+					continue
+				lines.append("[b]%s[/b]: %s" % [str(slot).capitalize(), _sheet_safe(str(piece.get("name", slot)))])
+				lines.append("  Armor %d/%d  •  Weight %d" % [int(piece.get("armor_hp", 0)), int(piece.get("max_armor_hp", piece.get("armor_hp", 0))), int(piece.get("weight", 0))])
+		"abilities":
+			lines.append("[b]EQUIPPED ABILITIES[/b]")
+			var abilities: Array = player.get("equipped_abilities", []) if player.get("equipped_abilities") is Array else []
+			if abilities.is_empty():
+				lines.append("None equipped")
+			else:
+				for ability_value in abilities:
+					if not ability_value is Dictionary:
+						continue
+					lines.append("[b]• %s[/b] — Cost %d" % [_sheet_safe(str(ability_value.get("name", "Ability"))), int(ability_value.get("resource_cost", 0))])
+					var ability_description: String = str(ability_value.get("description", "")).strip_edges()
+					if not ability_description.is_empty():
+						lines.append("  " + _sheet_safe(ability_description))
+			var features: Array = player.get("features", []) if player.get("features") is Array else []
+			if not features.is_empty():
+				lines.append("")
+				lines.append("[b]FEATURES[/b]")
+				for feature in features:
+					lines.append("• " + _sheet_safe(str(feature)))
+		_:
+			lines.append("[b]VITALS[/b]")
+			lines.append("HP  %d / %d" % [int(player.get("hp", 0)), int(player.get("max_hp", 0))])
+			lines.append("Armor  %d / %d  •  Weight %d" % [int(player.get("armor", 0)), int(player.get("max_armor", 0)), int(player.get("armor_weight", 0))])
+			lines.append("%s  %d / %d" % [_sheet_safe(str(player.get("resource_name", "Resource"))), int(player.get("resource", player.get("mana", 0))), int(player.get("max_resource", player.get("max_mana", 0)))])
+			lines.append("AC %d  •  Movement %d  •  Initiative %d" % [int(player.get("armor_class", 10)), int(player.get("movement", 0)), int(player.get("initiative_bonus", 0))])
+			lines.append("XP %d/%d  •  SP %d  •  AP %d" % [int(player.get("xp_orbs", 0)), int(player.get("xp_to_next_level", 0)), int(player.get("skill_points_unspent", 0)), int(player.get("ability_points", 0))])
+			lines.append("")
+			lines.append("[b]CORE STATS[/b]")
+			var stat_names: Array[String] = ["health", "resource", "strength", "dexterity", "agility", "constitution", "intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"]
+			for index in range(0, stat_names.size(), 2):
+				var left_name: String = stat_names[index]
+				var stat_line: String = "%s %d" % [left_name.capitalize(), int(stats.get(left_name, 0))]
+				if index + 1 < stat_names.size():
+					var right_name: String = stat_names[index + 1]
+					stat_line += "     %s %d" % [right_name.capitalize(), int(stats.get(right_name, 0))]
+				lines.append(stat_line)
 	character_text.text = "\n".join(lines)
+	character_text.scroll_to_line(0)
 
 
 func _sheet_safe(value: String) -> String:
