@@ -36,6 +36,7 @@ from backend.game.progression import xp_required_for_next_level
 from backend.game.resources import resource_key
 from backend.game.world_character_generation import install_world_aware_character_generation
 from backend.game.world_creation import generate_world
+from backend.game.world_exploration import generate_world_area
 
 HOST = os.getenv("SHATTERED_REALMS_API_HOST", "127.0.0.1")
 PORT = int(os.getenv("SHATTERED_REALMS_API_PORT", "8765"))
@@ -531,6 +532,77 @@ def _direct_combat_action(payload: Dict, action_type: str) -> Dict:
         return {"ok": False, "error": str(exc)}
 
 
+
+def _world_area_payload(payload: Dict) -> Dict:
+    world = GAME_MASTER.state.data.get("world_profile")
+    if not isinstance(world, dict) or not world:
+        return {"ok": False, "error": "Create and confirm a world before exploring it."}
+    player = GAME_MASTER.state.data.get("player")
+    if not isinstance(player, dict) or not player.get("character_creation_complete"):
+        return {"ok": False, "error": "Finish character creation before exploring the world."}
+
+    direction = str(payload.get("direction") or "current").lower().strip()
+    deltas = {
+        "current": (0, 0),
+        "north": (0, -1),
+        "south": (0, 1),
+        "west": (-1, 0),
+        "east": (1, 0),
+    }
+    if direction not in deltas:
+        return {"ok": False, "error": "Unknown exploration direction."}
+
+    exploration = GAME_MASTER.state.data.setdefault("exploration", {})
+    if not isinstance(exploration, dict):
+        exploration = {}
+        GAME_MASTER.state.data["exploration"] = exploration
+    areas = exploration.setdefault("areas", {})
+    if not isinstance(areas, dict):
+        areas = {}
+        exploration["areas"] = areas
+
+    current_x = int(exploration.get("current_x", 0) or 0)
+    current_y = int(exploration.get("current_y", 0) or 0)
+    delta_x, delta_y = deltas[direction]
+    target_x = current_x + delta_x
+    target_y = current_y + delta_y
+    target_key = f"{target_x},{target_y}"
+    current_key = f"{current_x},{current_y}"
+    previous_area = areas.get(current_key) if isinstance(areas.get(current_key), dict) else {}
+
+    area = areas.get(target_key)
+    generated = False
+    if not isinstance(area, dict):
+        area = generate_world_area(
+            GAME_MASTER.provider,
+            deepcopy(world),
+            target_x,
+            target_y,
+            direction,
+            deepcopy(previous_area),
+        )
+        areas[target_key] = deepcopy(area)
+        generated = True
+
+    exploration["current_x"] = target_x
+    exploration["current_y"] = target_y
+    exploration["current_area"] = deepcopy(area)
+    exploration["last_entry_direction"] = direction
+    GAME_MASTER.state.data["current_location"] = str(area.get("name") or "Unknown Area")
+    GAME_MASTER.state.save()
+
+    actions = area.get("suggested_actions") if isinstance(area.get("suggested_actions"), list) else []
+    suggested = [{"text": str(text), "requires_roll": False, "skill": None} for text in actions[:3]]
+    return {
+        "ok": True,
+        "area": deepcopy(area),
+        "generated": generated,
+        "entry_direction": direction,
+        "narration": str(area.get("arrival_text") or f"You enter {area.get('name', 'a new area')}."),
+        "suggested_actions": suggested,
+        "state": GAME_MASTER.state.snapshot(),
+    }
+
 def _handle_action(action: str) -> Dict:
     clean = str(action or "").strip()
     if not clean:
@@ -583,6 +655,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 if self.path == "/action":
                     result = _handle_action(str(payload.get("action") or ""))
+                elif self.path == "/world/area/generate":
+                    result = _world_area_payload(payload)
                 elif self.path == "/prototype/battle/start":
                     result = _prototype_start_battle()
                 elif self.path == "/combat/move":
@@ -639,3 +713,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
