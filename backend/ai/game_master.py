@@ -6,7 +6,7 @@ from typing import Dict, List
 
 from .context import ContextBuilder
 from .memory import CampaignMemory
-from .provider import provider_from_environment
+from .provider import _parse_json_object, provider_from_environment
 from .rules import RuleLibrary
 from backend.game.abilities import prepare_ability_roll, resolve_ability
 from backend.game.armor import apply_armor_stat_bonuses, armor_stat_bonuses
@@ -116,6 +116,122 @@ class GameMaster:
         self.context_builder = ContextBuilder()
         self.world = WorldSimulator()
         self.ready = True
+
+    @staticmethod
+    def _three_scene_suggestions(raw) -> List[Dict]:
+        suggestions: List[Dict] = []
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict):
+                    text = str(item.get("text") or "").strip()
+                    if text:
+                        suggestions.append({
+                            "text": text,
+                            "requires_roll": bool(item.get("requires_roll", False)),
+                            "skill": item.get("skill") if item.get("requires_roll") else None,
+                        })
+                else:
+                    text = str(item or "").strip()
+                    if text:
+                        suggestions.append({"text": text, "requires_roll": False, "skill": None})
+                if len(suggestions) == 3:
+                    break
+        fallbacks = [
+            {"text": "Look around and review what is happening nearby.", "requires_roll": False, "skill": None},
+            {"text": "Speak with someone nearby if anyone is present.", "requires_roll": False, "skill": None},
+            {"text": "Move toward the clearest path forward.", "requires_roll": False, "skill": None},
+        ]
+        existing = {str(item.get("text") or "").lower() for item in suggestions}
+        for fallback in fallbacks:
+            if len(suggestions) == 3:
+                break
+            if fallback["text"].lower() not in existing:
+                suggestions.append(deepcopy(fallback))
+        return suggestions[:3]
+
+    def remember_current_scene(self, result: Dict) -> None:
+        """Persist the last readable decision point so reopening the game is instant."""
+        if not isinstance(result, dict) or result.get("requires_roll"):
+            return
+        narration = str(result.get("narration") or "").strip()
+        if not narration:
+            return
+        suggestions = self._three_scene_suggestions(result.get("suggested_actions"))
+        result["suggested_actions"] = suggestions
+        player = self.state.data.get("player") if isinstance(self.state.data.get("player"), dict) else {}
+        self.state.data["current_scene"] = {
+            "narration": narration,
+            "suggested_actions": deepcopy(suggestions),
+            "location": str(player.get("location") or "unknown"),
+            "turn": int(self.state.data.get("turn", 0) or 0),
+        }
+        self.state.save()
+
+    def _apply_resume_location(self, result: Dict) -> None:
+        for change in result.get("state_changes", []) if isinstance(result.get("state_changes"), list) else []:
+            if not isinstance(change, dict):
+                continue
+            kind = str(change.get("type") or "").strip().lower()
+            path = str(change.get("path") or "").strip().lower()
+            if kind == "set_location" or path == "player.location":
+                location = str(change.get("location") or change.get("value") or "").strip()
+                if location:
+                    self.state.data.setdefault("player", {})["location"] = location
+
+    def resume_scene(self) -> Dict:
+        """Return the current decision point, recovering older malformed JSON saves when possible."""
+        snapshot = self.state.snapshot()
+        pending = snapshot.get("pending_roll")
+        if isinstance(pending, dict) and pending:
+            return {
+                "narration": "You still have a dice roll waiting. Finish that roll to continue the scene.",
+                "suggested_actions": [], "pending_roll": deepcopy(pending), "state": snapshot,
+            }
+
+        player = snapshot.get("player") if isinstance(snapshot.get("player"), dict) else {}
+        location = str(player.get("location") or "unknown").strip()
+        scene = snapshot.get("current_scene") if isinstance(snapshot.get("current_scene"), dict) else {}
+        if scene and location.lower() != "unknown":
+            narration = str(scene.get("narration") or "").strip()
+            suggestions = self._three_scene_suggestions(scene.get("suggested_actions"))
+            return {
+                "narration": f"You are currently at {location}.\n\n{narration}",
+                "suggested_actions": suggestions, "pending_roll": {}, "state": snapshot,
+            }
+
+        for memory in reversed(self.memory.recent(limit=12)):
+            recovered = _parse_json_object(str(memory.get("text") or ""))
+            if not isinstance(recovered, dict):
+                continue
+            narration = str(recovered.get("narration") or "").strip()
+            if not narration:
+                continue
+            self._apply_resume_location(recovered)
+            recovered["requires_roll"] = False
+            recovered["pending_roll"] = {}
+            self.remember_current_scene(recovered)
+            repaired_location = str(self.state.data.get("player", {}).get("location") or "unknown")
+            recovered["narration"] = f"You are currently at {repaired_location}.\n\n{narration}"
+            recovered["state"] = self.state.snapshot()
+            return recovered
+
+        context = self.context_builder.build(
+            player_action="Resume the saved game at the exact current decision point.",
+            game_state=snapshot,
+            memories=self.memory.context_for("current location and most recent scene"),
+            rules=self.rules.retrieve("session resume current location continuity"),
+        )
+        context["resume_scene"] = True
+        result = self.provider.respond(context)
+        self._apply_resume_location(result)
+        result["requires_roll"] = False
+        result["pending_roll"] = {}
+        self.remember_current_scene(result)
+        current_location = str(self.state.data.get("player", {}).get("location") or "unknown")
+        narration = str(result.get("narration") or "Your saved scene is ready.").strip()
+        result["narration"] = f"You are currently at {current_location}.\n\n{narration}"
+        result["state"] = self.state.snapshot()
+        return result
 
     def handle_action(self, player_action: str) -> Dict:
         action = player_action.strip()
@@ -293,6 +409,7 @@ class GameMaster:
             if mechanical_result: turn_record += f"\nMechanical check: {mechanical_result}"
             if combat_results: turn_record += f"\nCombat results: {combat_results}"
             self.memory.remember(turn_record, category="turn", importance=1, confirmed=True)
+        self.remember_current_scene(result)
         result["state"] = self.state.snapshot(); result["memory_count"] = len(self.memory.all()); return result
 
     def resolve_pending_roll(self) -> Dict:
@@ -339,6 +456,7 @@ class GameMaster:
             narration = str(result.get("narration", "")).strip()
             if narration:
                 self.memory.remember(f"Player action: {action}\nMechanical check: {mechanical_result}\nGame Master result: {narration}", category="turn", importance=1, confirmed=True)
+            self.remember_current_scene(result)
             self.state.save()
             result["state"] = self.state.snapshot()
             result["memory_count"] = len(self.memory.all())
@@ -427,6 +545,7 @@ class GameMaster:
         narration = str(result.get("narration", "")).strip()
         if narration:
             self.memory.remember(f"Player action: {action}\nCombat results: {events}\nGame Master result: {narration}", category="turn", importance=1, confirmed=True)
+        self.remember_current_scene(result)
         self.state.save()
         result["state"] = self.state.snapshot()
         result["memory_count"] = len(self.memory.all())
