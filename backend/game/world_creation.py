@@ -14,8 +14,8 @@ def _fallback_world(prompt: str) -> Dict:
         "supernatural_rules": "Only what the player requested exists.",
         "government_and_society": "To be discovered during play.", "factions": [],
         "important_locations": [], "cultures_and_species": [], "common_weapons_and_gear": [],
-        "economy": "Setting-appropriate currency and trade.", "major_conflicts": [],
-        "special_world_rules": [],
+        "economy": "Setting-appropriate currency and trade.", "currency_name": "currency", "currency_symbol": "",
+        "major_conflicts": [], "special_world_rules": [],
         "character_guidance": "Generate classes, resources, abilities, equipment, NPCs, enemies, and quests that strictly fit this world.",
         "player_request": prompt,
     }
@@ -29,19 +29,22 @@ The game can support fantasy, modern realistic crime/investigation, science fict
 Preserve the player's requested premise and tone. Expand it into a playable original world profile without changing the core fantasy of what they asked for.
 If the player references an existing franchise, capture the requested style, themes, gameplay concepts, and kinds of technology/powers without requiring exact copyrighted characters or plotlines.
 The world profile is authoritative context for all later generation: character class, resource name, abilities, weapons, equipment, NPCs, enemies, factions, quests, locations, economy, narration, and encounters must fit it.
-Return these keys: name, premise, genre, era, tone, technology_level, supernatural_rules, government_and_society, factions, important_locations, cultures_and_species, common_weapons_and_gear, economy, major_conflicts, special_world_rules, character_guidance, player_request.
+Choose one normal player-facing currency for the setting. Examples could be gold, credits, dollars, caps, crowns, marks, etc., but choose what actually fits this world. currency_name is the written unit name. currency_symbol is only used when the currency naturally has a symbol such as '$'; otherwise use an empty string.
+Return these keys: name, premise, genre, era, tone, technology_level, supernatural_rules, government_and_society, factions, important_locations, cultures_and_species, common_weapons_and_gear, economy, currency_name, currency_symbol, major_conflicts, special_world_rules, character_guidance, player_request.
 Use arrays of short strings for factions, important_locations, cultures_and_species, common_weapons_and_gear, major_conflicts, and special_world_rules."""
     response = client.responses.create(model=model, instructions=instructions, input=json.dumps({"player_world_request": prompt}, ensure_ascii=False))
     try: world = json.loads(response.output_text.strip())
     except (json.JSONDecodeError, AttributeError): world = _fallback_world(prompt)
     if not isinstance(world, dict): world = _fallback_world(prompt)
     world["player_request"] = prompt
+    if not str(world.get("currency_name") or "").strip(): world["currency_name"] = "currency"
+    if world.get("currency_symbol") is None: world["currency_symbol"] = ""
     return world
 
 
 def _print_world(world: Dict) -> None:
     print("\n" + "=" * 52); print("WORLD SUMMARY"); print("=" * 52)
-    labels = [("WORLD", "name"), ("PREMISE", "premise"), ("GENRE", "genre"), ("ERA", "era"), ("TONE", "tone"), ("TECHNOLOGY", "technology_level"), ("POWERS / SUPERNATURAL", "supernatural_rules"), ("SOCIETY", "government_and_society"), ("ECONOMY", "economy")]
+    labels = [("WORLD", "name"), ("PREMISE", "premise"), ("GENRE", "genre"), ("ERA", "era"), ("TONE", "tone"), ("TECHNOLOGY", "technology_level"), ("POWERS / SUPERNATURAL", "supernatural_rules"), ("SOCIETY", "government_and_society"), ("ECONOMY", "economy"), ("CURRENCY", "currency_name")]
     for label, key in labels:
         value = world.get(key)
         if value: print(f"{label}: {value}")
