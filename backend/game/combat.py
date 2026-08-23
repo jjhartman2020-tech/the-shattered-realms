@@ -262,7 +262,7 @@ def prepare_attack(combat: Dict, attacker_name: str, target_name: str, *,
 
 def resolve_prepared_attack_roll(combat: Dict, pending: Dict) -> Dict:
     """Roll only the d20 portion of an attack and return its hit result."""
-    if pending.get("kind") != "attack" or pending.get("stage") != "attack":
+    if pending.get("kind") not in {"attack", "ability_attack"} or pending.get("stage") != "attack":
         raise ValueError("No attack roll is waiting.")
     attacker = _find_actor(combat, str(pending.get("attacker") or ""))
     target = _find_actor(combat, str(pending.get("target") or ""))
@@ -305,6 +305,22 @@ def resolve_prepared_attack_roll(combat: Dict, pending: Dict) -> Dict:
         "accuracy_margin_damage_bonus": accuracy_margin_damage_bonus,
         "primary_action_used": True,
     }
+    if pending.get("source_kind") == "ability":
+        result.update({
+            "source_kind": "ability",
+            "actor": str(pending.get("actor") or pending.get("attacker") or ""),
+            "ability": str(pending.get("ability") or "Ability"),
+            "target_type": str(pending.get("target_type") or "enemy"),
+            "resource": pending.get("resource"),
+            "resource_name": pending.get("resource_name"),
+            "resource_cost": int(pending.get("resource_cost", 0) or 0),
+            "resource_before": int(pending.get("resource_before", 0) or 0),
+            "resource_after": int(pending.get("resource_after", 0) or 0),
+            "requires_attack_roll": True,
+            "damage_expression": str(pending.get("damage_expression") or "0"),
+            "damage_bonus_attribute": pending.get("damage_bonus_attribute"),
+            "damage_bonus": int(pending.get("damage_bonus", 0) or 0),
+        })
     combat.setdefault("log", []).append({"type": "attack_roll", **result})
     return result
 
@@ -339,6 +355,8 @@ def prepare_damage_roll(combat: Dict, pending: Dict, attack_result: Dict) -> Dic
         "armor_bonus_note": ". ".join(protection_notes) + ("." if protection_notes else ""),
         "attacker": str(pending.get("attacker")),
         "target": str(pending.get("target")),
+        "source_kind": pending.get("source_kind"),
+        "ability": pending.get("ability"),
         "damage_expression": expression,
         "damage_bonus": base_bonus,
         "accuracy_margin_damage_bonus": accuracy_bonus,
