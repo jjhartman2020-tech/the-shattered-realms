@@ -38,7 +38,7 @@ def _json_safe(value: Any) -> Any:
 def _resume_text(state: Dict) -> str:
     player = state.get("player", {}) if isinstance(state.get("player"), dict) else {}
     if not player.get("character_creation_complete"):
-        return "No completed character is saved yet. Character creation UI is coming next."
+        return "No completed character is saved yet. Use NEW GAME from the menu to begin a fresh campaign."
 
     name = str(player.get("name") or "Traveler")
     location = str(player.get("location") or "Unknown location")
@@ -76,6 +76,24 @@ def _session_payload() -> Dict:
         "suggested_actions": [],
         "state": state,
         "money_text": money,
+    }
+
+
+def _new_game_payload() -> Dict:
+    """Reset all campaign state/memory from a deliberate UI new-game action."""
+    GAME_MASTER.state.reset_for_new_campaign()
+    GAME_MASTER.memory.clear()
+    state = GAME_MASTER.state.snapshot()
+    return {
+        "ok": True,
+        "narration": (
+            "A new campaign is ready. Your old campaign state and AI memory were cleared. "
+            "The dedicated world and character creation screens are the next UI step."
+        ),
+        "suggested_actions": [],
+        "state": state,
+        "money_text": "0",
+        "new_game": True,
     }
 
 
@@ -123,7 +141,7 @@ def _handle_action(action: str) -> Dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ShatteredRealmsAPI/0.1"
+    server_version = "ShatteredRealmsAPI/0.2"
 
     def _send(self, status: int, payload: Dict) -> None:
         body = json.dumps(_json_safe(payload), ensure_ascii=False).encode("utf-8")
@@ -155,12 +173,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         try:
-            if self.path != "/action":
-                self._send(404, {"ok": False, "error": "Not found."})
-                return
             payload = self._read_json()
             with LOCK:
-                result = _handle_action(str(payload.get("action") or ""))
+                if self.path == "/action":
+                    result = _handle_action(str(payload.get("action") or ""))
+                elif self.path == "/new_game":
+                    result = _new_game_payload()
+                else:
+                    self._send(404, {"ok": False, "error": "Not found."})
+                    return
             self._send(200 if result.get("ok") else 400, result)
         except json.JSONDecodeError:
             self._send(400, {"ok": False, "error": "Invalid JSON body."})
