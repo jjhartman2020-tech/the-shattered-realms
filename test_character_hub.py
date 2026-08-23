@@ -20,6 +20,9 @@ class Images:
         ).decode("ascii")
         return SimpleNamespace(data=[SimpleNamespace(b64_json=tiny_png)])
 
+    def edit(self, **_kwargs):
+        return self.generate()
+
 
 class Memory:
     def context_for(self, _query): return []
@@ -108,6 +111,12 @@ def main():
             assert generated_portrait["ok"] is True
             assert generated_portrait["portrait_available"] is True
             assert api.PORTRAIT_PATH.is_file()
+
+            edited_portrait = api._character_hub_action(
+                {"changed_slot": "helmet", "change_type": "unequip"}, "generate_portrait"
+            )
+            assert edited_portrait["ok"] is True
+            assert edited_portrait["portrait_available"] is True
         finally:
             api.GAME_MASTER = original_gm
             api.PORTRAIT_PATH = original_portrait_path
