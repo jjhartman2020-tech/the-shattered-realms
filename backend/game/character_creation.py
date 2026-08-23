@@ -14,6 +14,7 @@ from .attributes import (
     validate_allocation,
 )
 from .dice import normalize_damage_expression
+from .economy import currency_profile, format_money
 from .progression import ABILITY_TIER_COSTS, xp_required_for_next_level
 from .resources import resource_key
 
@@ -41,17 +42,17 @@ def _fallback_generation(name: str, appearance: str, stats: Dict[str, int]) -> D
             _starter_ability({"name": "Second Wind", "description": "A small restorative surge.", "resource_cost": 15, "target": "self", "range": 0, "healing": "1d6"}),
         ],
         "starter_kits": [
-            {"name": "Vanguard Kit", "items": [
+            {"name": "Vanguard Kit", "starting_currency": 15, "items": [
                 {"name": "Worn Iron Sword", "type": "weapon", "description": "A plain starter sword.", "damage": "1d6", "range": 1, "attack_attribute": "strength"},
                 {"name": "Leather Coat", "type": "armor", "description": "Simple light protection.", "armor_bonus": 1},
                 {"name": "Healing Draught", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
             ]},
-            {"name": "Scout Kit", "items": [
+            {"name": "Scout Kit", "starting_currency": 25, "items": [
                 {"name": "Simple Shortbow", "type": "weapon", "description": "A modest starter bow.", "damage": "1d4", "range": 5, "attack_attribute": "dexterity"},
                 {"name": "Travel Cloak", "type": "armor", "description": "Light protection for the road.", "armor_bonus": 1},
                 {"name": "Rope", "type": "utility", "description": "Useful for climbing and traversal."},
             ]},
-            {"name": "Mystic Kit", "items": [
+            {"name": "Mystic Kit", "starting_currency": 20, "items": [
                 {"name": "Cracked Focus Rod", "type": "weapon", "description": "A weak magical focus.", "damage": "1d4", "range": 4, "attack_attribute": "magic"},
                 {"name": "Padded Robes", "type": "armor", "description": "Basic protective robes.", "armor_bonus": 1},
                 {"name": "Restorative Tonic", "type": "consumable", "description": "Restores a small amount of health.", "healing": "1d6"},
@@ -100,8 +101,6 @@ def _normalize_items(items: List[Dict]) -> List[Dict]:
         if item_type == "weapon":
             item.pop("resource_cost", None)
         if item_type == "shield":
-            # Starter equipment shields are real defensive gear, not flavor text.
-            # Keep them beginner-balanced even if generation returns nonsense.
             try:
                 shield_hp = int(item.get("shield", 4) or 4)
             except (TypeError, ValueError):
@@ -116,9 +115,16 @@ def _normalize_items(items: List[Dict]) -> List[Dict]:
 def _normalize_generated_equipment(package: Dict) -> Dict:
     result = deepcopy(package)
     kits = []
-    for raw_kit in result.get("starter_kits", []):
+    fallback_money = (15, 25, 20)
+    for index, raw_kit in enumerate(result.get("starter_kits", [])):
         kit = deepcopy(raw_kit) if isinstance(raw_kit, dict) else {}
         kit["items"] = _normalize_items(kit.get("items", []))
+        try:
+            starting_currency = int(kit.get("starting_currency", fallback_money[index] if index < len(fallback_money) else 20) or 20)
+        except (TypeError, ValueError):
+            starting_currency = fallback_money[index] if index < len(fallback_money) else 20
+        # Starter money should matter, but it should not overwhelm the early economy.
+        kit["starting_currency"] = max(10, min(30, starting_currency))
         kits.append(kit)
     result["starter_kits"] = kits
     result["special_equipment"] = _normalize_items(result.get("special_equipment", []))
@@ -158,9 +164,10 @@ Generate a unique beginner-friendly class, thematic resource name, and backstory
 Generate exactly 6 BEGINNER abilities. Every starter ability has tier='beginner' and ability_point_cost=1. Character-creation ability choices are granted as part of the starting package, so the player does not spend AP for the two chosen starters.
 Every ability must have exact mechanics: name, description, resource_cost, target, range and exact applicable fields such as damage, healing, movement_squares, shield, duration, target_count, or effect. Damage and healing MUST use dice notation such as 1d4, 1d6, 1d8, or 2d6, never fixed totals such as 4 or 6. Resource costs are real points in multiples of 5. Do NOT reduce costs to 0 just because the character has 0 or low maximum Resource. A player may choose an ability they cannot currently afford; it remains unusable until Resource is raised.
 Starter abilities must be weak compared with later Novice/Expert/Master/Legendary abilities.
-Generate exactly 3 starter kits with 3-4 structured item objects. Starter weapons are weak and must include type='weapon', description, dice-based damage, range, and attack_attribute. Weapon damage MUST be a dice expression, never a fixed total. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
+Generate exactly 3 starter kits with 3-4 structured item objects. EACH starter kit must also include integer starting_currency between 10 and 30. Around 20 is the normal baseline. Balance it against the kit: a gear-heavy/combat-heavy kit can start with less money, while a lighter/trader/scout/resourceful kit can start with more. The number represents units of the confirmed world's currency, whatever that currency is; never hardcode the word gold, dollars, or credits into the number.
+Starter weapons are weak and must include type='weapon', description, dice-based damage, range, and attack_attribute. Weapon damage MUST be a dice expression, never a fixed total. WEAPONS DO NOT USE CLASS RESOURCE AND MUST NOT HAVE resource_cost. Basic weapon attacks never consume Mana, Stamina, Rage, Focus, or any other class Resource. Resource costs belong to abilities only.
 Generate exactly 6 special starter equipment options as structured objects with exact mechanics when applicable. Any item with type='weapon' must also have dice-based damage and no resource_cost. Any item with type='shield' MUST include integer shield between 3 and 5. This is its Beginner Shield HP. Shields do not use class Resource and must not have resource_cost or armor_bonus. Shield HP is a separate defensive pool, not AC and not Armor HP. Do not grant permanent stat increases.
-Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment."""
+Top-level keys: class_name, resource_name, backstory, abilities, starter_kits, special_equipment. Each starter_kits entry must contain name, starting_currency, and items."""
     payload = {"name": name, "appearance": appearance, "confirmed_stats": stats,
                "derived": {"max_hp": sheet["max_health_base"], "max_resource": max_resource,
                            "resource_regen": sheet["resource_regeneration_per_round"], "movement": sheet["movement"]}}
@@ -259,6 +266,8 @@ def run_character_creation(game_master) -> Dict:
     print("\nGenerating your class, backstory, abilities, and starting gear...")
     package = generate_character_package(game_master.provider, name=name, appearance=appearance, stats=stats)
     resource_name = str(package.get("resource_name") or "Resource").strip() or "Resource"
+    world = game_master.state.data.get("world_profile", {})
+    money_profile = currency_profile(world)
     print(f"\nCLASS: {package['class_name']}")
     print(f"RESOURCE: {resource_name}")
     print(f"BACKSTORY: {package['backstory']}")
@@ -277,8 +286,11 @@ def run_character_creation(game_master) -> Dict:
     kits = package["starter_kits"]
     print("\nSTARTER KITS — choose 1")
     for i, kit in enumerate(kits, 1):
-        print(f"{i}. {kit.get('name')} — " + "; ".join(_print_item(item, resource_name) for item in kit.get("items", [])))
+        starting_money = format_money(int(kit.get("starting_currency", 20) or 20), money_profile)
+        items_text = "; ".join(_print_item(item, resource_name) for item in kit.get("items", []))
+        print(f"{i}. {kit.get('name')} — Starting Money: {starting_money}; {items_text}")
     chosen_kit = _choose_one(kits, "Choose a kit: ")
+    starting_money = max(10, min(30, int(chosen_kit.get("starting_currency", 20) or 20)))
 
     equipment = package["special_equipment"]
     print("\nSPECIAL STARTER EQUIPMENT — choose 2")
@@ -310,6 +322,7 @@ def run_character_creation(game_master) -> Dict:
         "special_starting_equipment": deepcopy(chosen_equipment), "equipped_weapon": deepcopy(starter_weapon),
         "equipped_shield": deepcopy(starter_shield), "shield_hp": starter_shield_hp, "max_shield_hp": starter_shield_hp,
         "damage": normalize_damage_expression(starter_weapon.get("damage", "1d4"), "1d4") if starter_weapon else "1d4",
+        "wallet": {"amount": starting_money, **money_profile},
         "character_creation_complete": True,
     })
     game_master.state.data.update({"combat": {"active": False}, "encounter_template": {},
@@ -320,6 +333,7 @@ def run_character_creation(game_master) -> Dict:
     print("\nFINAL CHARACTER SUMMARY")
     print(f"  {name} — {player['class']} | Level 1 | SP 0 | AP 0 | XP 0/{player['xp_to_next_level']}")
     _print_derived_sheet(sheet, resource_name)
+    print(f"  Starting Money:          {format_money(starting_money, money_profile)}")
     print("  Chosen Abilities:")
     for ability in chosen_abilities: print(f"    - {ability.get('name')}: {_effect_text(ability, resource_name)}")
     print("  Starter Kit:             " + str(chosen_kit.get("name")))
