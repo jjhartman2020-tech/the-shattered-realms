@@ -28,7 +28,8 @@ from backend.game.attributes import (
     normalize_attributes,
     validate_allocation,
 )
-from backend.game.combat import current_actor, end_turn
+from backend.game.abilities import resolve_ability
+from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack
 from backend.game.dice import normalize_damage_expression
 from backend.game.economy import currency_profile, ensure_wallet, format_money
 from backend.game.progression import xp_required_for_next_level
@@ -411,6 +412,125 @@ def _direct_end_turn() -> Dict | None:
     }
 
 
+def _combat_response(narration: str, events: List[Dict], combat: Dict) -> Dict:
+    GAME_MASTER._persist_combat(combat)
+    return {
+        "ok": True,
+        "narration": narration,
+        "suggested_actions": [],
+        "combat": deepcopy(combat),
+        "combat_results": events,
+        "state": GAME_MASTER.state.snapshot(),
+    }
+
+
+def _player_combat_context() -> tuple[Dict, Dict, str]:
+    combat = GAME_MASTER.state.data.get("combat")
+    if not isinstance(combat, dict) or not combat.get("active"):
+        raise ValueError("No tactical battle is active.")
+    player = GAME_MASTER.state.data.get("player")
+    if not isinstance(player, dict):
+        raise ValueError("No player character is available.")
+    player_name = str(player.get("name") or "Traveler")
+    actor = current_actor(combat)
+    if not actor or str(actor.get("name")) != player_name:
+        raise ValueError("Wait for the enemy turn to finish.")
+    return combat, player, player_name
+
+
+def _prototype_start_battle() -> Dict:
+    player = GAME_MASTER.state.data.get("player")
+    if not isinstance(player, dict) or not player.get("character_creation_complete"):
+        return {"ok": False, "error": "Finish character creation before entering the tactical arena."}
+    existing = GAME_MASTER.state.data.get("combat")
+    if isinstance(existing, dict) and existing.get("active"):
+        return _combat_response("The current battle continues.", [], existing)
+
+    GAME_MASTER.state.set_path("player.combat_position", {"x": 2, "y": 4}, save=False)
+    combat = GAME_MASTER._start_combat({
+        "enemies": [{
+            "name": "Practice Sentinel",
+            "role": "training opponent",
+            "level": 1,
+            "hp": 12,
+            "armor_class": 10,
+            "damage": "1d4",
+            "attack_range": 1,
+            "position": {"x": 8, "y": 4},
+            "attributes": {"health": 2, "strength": 3, "agility": 2, "speed": 2, "defense": 1},
+        }]
+    })
+    events = [{"type": "combat_start", "order": combat.get("order", []), "initiative": combat.get("initiative", [])}]
+    events.extend(GAME_MASTER._run_enemy_turns(combat))
+    return _combat_response("The world expands into a tactical arena. Move by squares, choose a target, and use your abilities.", events, combat)
+
+
+def _direct_combat_action(payload: Dict, action_type: str) -> Dict:
+    try:
+        combat, player, player_name = _player_combat_context()
+        events: List[Dict] = []
+
+        if action_type == "move":
+            event = move_actor(combat, player_name, int(payload.get("x")), int(payload.get("y")), enforce_turn=True)
+            events.append({"type": "player_move", **event})
+            narration = f"{player_name} moves {event.get('distance', 0)} squares."
+
+        elif action_type == "attack":
+            target = str(payload.get("target") or "").strip()
+            if not target:
+                raise ValueError("Choose an enemy target.")
+            weapon = player.get("equipped_weapon") if isinstance(player.get("equipped_weapon"), dict) else {}
+            attack_attribute = str(weapon.get("attack_attribute") or "strength").lower()
+            if attack_attribute not in {"strength", "dexterity", "magic"}:
+                attack_attribute = "strength"
+            event = resolve_attack(
+                combat,
+                player_name,
+                target,
+                attack_attribute=attack_attribute,
+                attack_range=int(weapon.get("range", 1) or 1),
+                damage_expression=str(weapon.get("damage") or player.get("damage") or "1d4"),
+                enforce_turn=True,
+            )
+            events.append({"type": "player_attack", **event})
+            narration = f"{player_name} attacks {target}."
+            if combat.get("active"):
+                events.append({"type": "player_end_turn", "actor": player_name, "automatic": True})
+                end_turn(combat)
+                events.extend(GAME_MASTER._run_enemy_turns(combat))
+
+        elif action_type == "ability":
+            ability_name = str(payload.get("ability") or "").strip()
+            if not ability_name:
+                raise ValueError("Choose an ability.")
+            target = str(payload.get("target") or "").strip() or None
+            event = resolve_ability(combat, player_name, ability_name, target, enforce_turn=True)
+            events.append({"type": "player_ability", **event})
+            narration = f"{player_name} uses {ability_name}."
+
+        elif action_type == "defend":
+            event = defend_actor(combat, player_name, enforce_turn=True)
+            events.append({"type": "player_defend", **event})
+            narration = f"{player_name} takes a defensive stance."
+
+        elif action_type == "end_turn":
+            direct = _direct_end_turn()
+            if direct is None:
+                raise ValueError("No tactical battle is active.")
+            direct["ok"] = True
+            return direct
+
+        else:
+            raise ValueError("Unknown tactical action.")
+
+        if not combat.get("active"):
+            winner = str(combat.get("winner") or "")
+            narration += " The battle is over." if winner else ""
+        return _combat_response(narration, events, combat)
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _handle_action(action: str) -> Dict:
     clean = str(action or "").strip()
     if not clean:
@@ -463,6 +583,18 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 if self.path == "/action":
                     result = _handle_action(str(payload.get("action") or ""))
+                elif self.path == "/prototype/battle/start":
+                    result = _prototype_start_battle()
+                elif self.path == "/combat/move":
+                    result = _direct_combat_action(payload, "move")
+                elif self.path == "/combat/attack":
+                    result = _direct_combat_action(payload, "attack")
+                elif self.path == "/combat/ability":
+                    result = _direct_combat_action(payload, "ability")
+                elif self.path == "/combat/defend":
+                    result = _direct_combat_action(payload, "defend")
+                elif self.path == "/combat/end_turn":
+                    result = _direct_combat_action(payload, "end_turn")
                 elif self.path == "/new_game":
                     result = _new_game_payload()
                 elif self.path == "/creation/world/generate":
