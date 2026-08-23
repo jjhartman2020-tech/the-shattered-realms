@@ -43,6 +43,7 @@ var status_label: Label
 var content_box: VBoxContainer
 var tab_buttons: Dictionary = {}
 var portrait_texture: ImageTexture
+var portrait_stale := false
 
 
 func _ready() -> void:
@@ -56,8 +57,7 @@ func open_with_state(new_state: Dictionary) -> void:
 	game_state = new_state.duplicate(true)
 	visible = true
 	_render()
-	if portrait_texture == null:
-		call_deferred("_request", "/character/portrait/load", {}, "character_portrait")
+	call_deferred("_request", "/character/portrait/load", {}, "character_portrait")
 
 
 func apply_payload(payload: Dictionary) -> void:
@@ -72,18 +72,16 @@ func apply_payload(payload: Dictionary) -> void:
 		_load_portrait_texture(portrait_base64)
 	elif "portrait_available" in payload and not bool(payload.get("portrait_available", false)):
 		portrait_texture = null
+	if "portrait_stale" in payload:
+		portrait_stale = bool(payload.get("portrait_stale", false))
+	var equipment_change = payload.get("equipment_change")
+	if equipment_change is Dictionary:
+		portrait_stale = true
 	var message := str(payload.get("message", ""))
 	set_status(message, false)
 	_render()
-	var equipment_change = payload.get("equipment_change")
 	if equipment_change is Dictionary:
-		var changed_slot := str(equipment_change.get("slot", ""))
-		var change_type := "unequip" if equipment_change.has("unequipped") else "equip"
-		if changed_slot.is_empty():
-			var equipped_piece = equipment_change.get("equipped")
-			if equipped_piece is Dictionary:
-				changed_slot = str(equipped_piece.get("slot", ""))
-		call_deferred("_refresh_art_after_armor_change", changed_slot, change_type)
+		call_deferred("_sync_art_after_armor_change")
 
 
 func set_status(message: String, is_error: bool = false) -> void:
@@ -382,11 +380,21 @@ func _render_armor(player: Dictionary) -> void:
 		portrait_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		portrait_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
 		portrait_placeholder.add_child(portrait_text)
-	var art_button := _button("REFRESH CHARACTER ART" if portrait_texture != null else "GENERATE CHARACTER ART", true)
+	var art_label: String
+	if portrait_texture == null:
+		art_label = "GENERATE CHARACTER ART"
+	elif portrait_stale:
+		art_label = "UPDATE OUTFIT ART"
+	else:
+		art_label = "REGENERATE CHARACTER ART"
+	var art_button := _button(art_label, true)
 	art_button.custom_minimum_size.y = 44
-	art_button.pressed.connect(_request.bind("/character/portrait/generate", {}, "character_portrait"))
+	var art_payload: Dictionary = {"force_refresh": not portrait_stale}
+	art_button.pressed.connect(_request.bind("/character/portrait/generate", art_payload, "character_portrait"))
 	profile_box.add_child(art_button)
-	profile_box.add_child(_muted("Art uses the saved appearance, world, class, and currently equipped armor. It only calls image generation when you press the button."))
+	if portrait_stale:
+		profile_box.add_child(_warning("PICTURE OUT OF DATE — finish changing armor, then update it once."))
+	profile_box.add_child(_muted("Change as many pieces as you want, then update once. Previously generated loadouts restore instantly and look exactly the same."))
 	for slot in ARMOR_SLOTS:
 		var piece = equipped.get(slot)
 		var slot_row := HBoxContainer.new()
@@ -477,13 +485,9 @@ func _load_portrait_texture(encoded: String) -> void:
 	portrait_texture = ImageTexture.create_from_image(generated_image)
 
 
-func _refresh_art_after_armor_change(changed_slot: String, change_type: String) -> void:
-	set_status("Armor changed. Updating the character picture...", false)
-	_request(
-		"/character/portrait/generate",
-		{"changed_slot": changed_slot, "change_type": change_type},
-		"character_portrait"
-	)
+func _sync_art_after_armor_change() -> void:
+	set_status("Armor changed. Checking for a saved outfit picture...", false)
+	_request("/character/portrait/load", {}, "character_portrait")
 
 
 func _combat_active() -> bool:
