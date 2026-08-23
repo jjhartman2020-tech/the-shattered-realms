@@ -14,14 +14,23 @@ class Provider:
 
 
 class Images:
+    def __init__(self):
+        self.generate_calls = 0
+        self.edit_calls = 0
+
     def generate(self, **_kwargs):
+        self.generate_calls += 1
         tiny_png = base64.b64encode(
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
         ).decode("ascii")
         return SimpleNamespace(data=[SimpleNamespace(b64_json=tiny_png)])
 
     def edit(self, **_kwargs):
-        return self.generate()
+        self.edit_calls += 1
+        tiny_png = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+        ).decode("ascii")
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=tiny_png)])
 
 
 class Memory:
@@ -106,17 +115,38 @@ def main():
             assert old_save_portrait["ok"] is True
             gm.state.data["player"]["character_creation_complete"] = True
 
-            gm.provider.client = SimpleNamespace(images=Images())
+            images = Images()
+            gm.provider.client = SimpleNamespace(images=images)
             generated_portrait = api._character_hub_action({}, "generate_portrait")
             assert generated_portrait["ok"] is True
             assert generated_portrait["portrait_available"] is True
+            assert generated_portrait["portrait_stale"] is False
             assert api.PORTRAIT_PATH.is_file()
+            assert images.generate_calls == 1
 
-            edited_portrait = api._character_hub_action(
-                {"changed_slot": "helmet", "change_type": "unequip"}, "generate_portrait"
-            )
+            exact_empty = api._character_hub_action({}, "load_portrait")
+            assert exact_empty["portrait_cached"] is True
+            assert exact_empty["portrait_stale"] is False
+
+            second_equip = api._character_hub_action({"inventory_index": 0}, "equip_armor")
+            assert second_equip["ok"] is True
+            stale_armor = api._character_hub_action({}, "load_portrait")
+            assert stale_armor["portrait_available"] is True
+            assert stale_armor["portrait_stale"] is True
+            assert images.edit_calls == 0
+
+            edited_portrait = api._character_hub_action({}, "generate_portrait")
             assert edited_portrait["ok"] is True
             assert edited_portrait["portrait_available"] is True
+            assert images.edit_calls == 1
+
+            second_unequip = api._character_hub_action({"slot": "breastplate"}, "unequip_armor")
+            assert second_unequip["ok"] is True
+            restored_empty = api._character_hub_action({}, "load_portrait")
+            assert restored_empty["portrait_cached"] is True
+            assert restored_empty["portrait_stale"] is False
+            assert images.generate_calls == 1
+            assert images.edit_calls == 1
         finally:
             api.GAME_MASTER = original_gm
             api.PORTRAIT_PATH = original_portrait_path
