@@ -1,5 +1,7 @@
 extends Control
 
+const CharacterHubView = preload("res://character_hub.gd")
+
 const API_BASE := "http://127.0.0.1:8765"
 const BG := Color("0b0f17")
 const PANEL := Color("151b26")
@@ -45,6 +47,7 @@ var action_input: LineEdit
 var send_button: Button
 var context_title: Label
 var context_text: RichTextLabel
+var character_hub
 
 
 func _ready() -> void:
@@ -126,8 +129,16 @@ func _build_ui() -> void:
 	]:
 		var button := _make_button(entry[0], false)
 		button.custom_minimum_size = Vector2(150, 42)
-		button.pressed.connect(_show_context.bind(entry[1]))
+		if entry[1] == "player":
+			button.pressed.connect(_open_character_hub)
+		else:
+			button.pressed.connect(_show_context.bind(entry[1]))
 		nav.add_child(button)
+
+	character_hub = CharacterHubView.new()
+	character_hub.visible = false
+	character_hub.api_request.connect(_character_hub_request)
+	add_child(character_hub)
 
 
 func _build_player_panel() -> PanelContainer:
@@ -377,6 +388,28 @@ func _send_from_input() -> void:
 	_send_action(action_input.text)
 
 
+func _open_character_hub() -> void:
+	if not is_instance_valid(character_hub):
+		return
+	character_hub.open_with_state(latest_state)
+
+
+func _character_hub_request(endpoint: String, payload: Dictionary, mode: String) -> void:
+	if busy:
+		character_hub.set_status("Wait for the current request to finish.", true)
+		return
+	busy = true
+	request_mode = mode
+	connection_label.text = "Saving character..."
+	connection_label.add_theme_color_override("font_color", MUTED)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var body := JSON.stringify(payload)
+	var err := http.request(API_BASE + endpoint, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		busy = false
+		character_hub.set_status("Could not reach the Character Hub backend.", true)
+
+
 func _send_action(action: String) -> void:
 	var clean := action.strip_edges()
 	if clean.is_empty() or busy or not pending_roll.is_empty():
@@ -430,14 +463,20 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_set_inputs_enabled(pending_roll.is_empty())
 		if is_instance_valid(roll_button):
 			roll_button.disabled = false
-		_set_connection_error("Backend unavailable — run: python -m backend.api")
+		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
+			character_hub.set_status("Backend unavailable — restart python -m backend.api", true)
+		else:
+			_set_connection_error("Backend unavailable — run: python -m backend.api")
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not parsed is Dictionary:
 		busy = false
 		_stop_roll_animation()
 		_set_inputs_enabled(pending_roll.is_empty())
-		_set_connection_error("Backend returned invalid data")
+		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
+			character_hub.set_status("Backend returned invalid character data.", true)
+		else:
+			_set_connection_error("Backend returned invalid data")
 		return
 	var payload: Dictionary = parsed
 	if not payload.get("ok", false):
@@ -446,7 +485,19 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_set_inputs_enabled(pending_roll.is_empty())
 		if is_instance_valid(roll_button):
 			roll_button.disabled = false
-		_set_connection_error(str(payload.get("error", "Unknown backend error")))
+		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
+			character_hub.set_status(str(payload.get("error", "Unknown Character Hub error")), true)
+		else:
+			_set_connection_error(str(payload.get("error", "Unknown backend error")))
+		return
+	if request_mode.begins_with("character_"):
+		busy = false
+		latest_state = payload.get("state", {}) if payload.get("state", {}) is Dictionary else latest_state
+		connection_label.text = "● BACKEND CONNECTED"
+		connection_label.add_theme_color_override("font_color", SUCCESS)
+		_update_player_panel()
+		if is_instance_valid(character_hub):
+			character_hub.apply_payload(payload)
 		return
 	if request_mode == "roll":
 		var final_roll: int = _extract_authoritative_roll(payload)
