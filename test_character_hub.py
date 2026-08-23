@@ -97,6 +97,12 @@ def main():
             empty_portrait = api._character_hub_action({}, "load_portrait")
             assert empty_portrait["ok"] is True
             assert empty_portrait["portrait_available"] is False
+
+            gm.state.data["player"]["character_creation_complete"] = False
+            old_save_portrait = api._character_hub_action({}, "load_portrait")
+            assert old_save_portrait["ok"] is True
+            gm.state.data["player"]["character_creation_complete"] = True
+
             gm.provider.client = SimpleNamespace(images=Images())
             generated_portrait = api._character_hub_action({}, "generate_portrait")
             assert generated_portrait["ok"] is True
