@@ -25,8 +25,6 @@ func _ready() -> void:
 
 
 func _build_menu() -> void:
-	# The dark backdrop is visual only. It deliberately ignores mouse input so
-	# clicks can reach the actual menu controls above it.
 	var backdrop := ColorRect.new()
 	backdrop.color = Color(0, 0, 0, 0.72)
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -210,3 +208,7 @@ func _on_new_game_completed(result: int, response_code: int, _headers: PackedStr
 	parent._set_suggestions(parsed.get("suggested_actions", []))
 	parent._show_context("player")
 	parent.connection_label.text = "● BACKEND CONNECTED"
+
+	var creator = parent.get_node_or_null("CharacterCreation")
+	if creator != null:
+		creator.begin_new_game(parent.latest_state)
