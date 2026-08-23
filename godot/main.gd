@@ -457,7 +457,7 @@ func _roll_pending() -> void:
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+	if result != HTTPRequest.RESULT_SUCCESS:
 		busy = false
 		_stop_roll_animation()
 		_set_inputs_enabled(pending_roll.is_empty())
@@ -467,6 +467,21 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			character_hub.set_status("Backend unavailable — restart python -m backend.api", true)
 		else:
 			_set_connection_error("Backend unavailable — run: python -m backend.api")
+		return
+	if response_code < 200 or response_code >= 300:
+		busy = false
+		_stop_roll_animation()
+		_set_inputs_enabled(pending_roll.is_empty())
+		if is_instance_valid(roll_button):
+			roll_button.disabled = false
+		var error_parsed = JSON.parse_string(body.get_string_from_utf8())
+		var error_message := "Backend request failed (HTTP %d)." % response_code
+		if error_parsed is Dictionary:
+			error_message = str(error_parsed.get("error", error_message))
+		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
+			character_hub.set_status(error_message, true)
+		else:
+			_set_connection_error(error_message)
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not parsed is Dictionary:
