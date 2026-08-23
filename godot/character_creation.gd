@@ -587,6 +587,7 @@ func _show_armor() -> void:
 	shell_title.text = "STARTING ARMOR"
 	shell_subtitle.text = "Step 4 of 4  •  Armor is a separate health bar. Starting sets total only 10–20 Armor HP."
 	content.add_child(_muted("Choose one AI-generated set, or describe a custom look/build below. Custom armor is still balanced to Beginner strength."))
+	content.add_child(_muted("ARMOR WEIGHT: 0–13 has no movement penalty, 14–21 gives -1 Movement, 22–29 gives -2, and 30+ gives -3. Weight does not change Armor HP or Armor Class."))
 
 	armor_buttons.clear()
 	var group := ButtonGroup.new()
@@ -845,10 +846,21 @@ func _armor_text(armor) -> String:
 		if stat_bonus is Dictionary:
 			bonus = " +%s %s" % [str(stat_bonus.get("amount", 0)), str(stat_bonus.get("stat", "")).capitalize()]
 		pieces_text.append("%s %s Armor%s" % [str(piece.get("slot", "")).capitalize(), str(piece.get("armor_hp", 0)), bonus])
-	return "%s — %s\nTotal Armor %s  •  Weight %s\n%s" % [
+	var total_weight := _armor_weight(armor)
+	return "%s — %s\nTotal Armor %s  •  Weight %s (%s)\n%s" % [
 		str(armor.get("name", "Armor Set")), str(armor.get("description", "")),
-		str(armor.get("total_armor", 0)), _armor_weight(armor), "  |  ".join(pieces_text)
+		str(armor.get("total_armor", 0)), total_weight, _armor_weight_effect(total_weight), "  |  ".join(pieces_text)
 	]
+
+
+func _armor_weight_effect(weight: int) -> String:
+	if weight >= 30:
+		return "-3 Movement"
+	if weight >= 22:
+		return "-2 Movement"
+	if weight >= 14:
+		return "-1 Movement"
+	return "No Movement penalty"
 
 
 func _armor_weight(armor: Dictionary) -> int:
