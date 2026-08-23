@@ -12,6 +12,7 @@ from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
 import threading
 from typing import Any, Dict, List
 
@@ -29,6 +30,14 @@ from backend.game.attributes import (
     validate_allocation,
 )
 from backend.game.abilities import prepare_ability_roll, resolve_ability
+from backend.game.ability_learning import available_to_learn, generate_ability_choices, learn_ability
+from backend.game.character_hub import (
+    cached_character_portrait,
+    equip_armor_from_inventory,
+    generate_character_portrait,
+    spend_stat_point,
+    unequip_armor_slot,
+)
 from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, prepare_attack, resolve_attack
 from backend.game.dice import normalize_damage_expression
 from backend.game.economy import currency_profile, ensure_wallet, format_money
@@ -53,10 +62,20 @@ CREATION_SESSION: Dict[str, Any] = {
     "package": None,
     "armor_options": [],
 }
+CHARACTER_HUB_SESSION: Dict[str, Any] = {"ability_choices": []}
+PORTRAIT_PATH = Path(os.getenv("SHATTERED_REALMS_PORTRAIT_FILE", "data/character_portrait.png"))
 
 
 def _clear_creation_session() -> None:
     CREATION_SESSION.update({"world": None, "identity": None, "package": None, "armor_options": []})
+
+
+def _clear_character_hub_session() -> None:
+    CHARACTER_HUB_SESSION["ability_choices"] = []
+    try:
+        PORTRAIT_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _json_safe(value: Any) -> Any:
@@ -118,6 +137,7 @@ def _new_game_payload() -> Dict:
     GAME_MASTER.state.reset_for_new_campaign()
     GAME_MASTER.memory.clear()
     _clear_creation_session()
+    _clear_character_hub_session()
     state = GAME_MASTER.state.snapshot()
     return {
         "ok": True,
@@ -660,6 +680,91 @@ def _handle_roll() -> Dict:
         return {"ok": False, "error": str(exc)}
 
 
+def _character_hub_response(message: str = "", **extra) -> Dict:
+    result = {
+        "ok": True,
+        "message": str(message or ""),
+        "state": GAME_MASTER.state.snapshot(),
+        "ability_choices": deepcopy(CHARACTER_HUB_SESSION.get("ability_choices", [])),
+    }
+    result.update(extra)
+    return _json_safe(result)
+
+
+def _character_hub_action(payload: Dict, action_type: str) -> Dict:
+    try:
+        player = GAME_MASTER.state.data.get("player")
+        if not isinstance(player, dict) or not player.get("character_creation_complete"):
+            raise ValueError("Finish character creation before opening the Character Hub.")
+
+        if action_type == "load_portrait":
+            encoded = cached_character_portrait(PORTRAIT_PATH)
+            return _character_hub_response(
+                "", portrait_base64=encoded, portrait_available=bool(encoded), portrait_format="png"
+            )
+
+        if action_type == "generate_portrait":
+            try:
+                encoded = generate_character_portrait(GAME_MASTER, PORTRAIT_PATH)
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise ValueError(f"Character art could not be generated: {exc}") from exc
+            return _character_hub_response(
+                "Character art generated from your current appearance and armor.",
+                portrait_base64=encoded,
+                portrait_available=True,
+                portrait_format="png",
+            )
+
+        combat = GAME_MASTER.state.data.get("combat")
+        if isinstance(combat, dict) and combat.get("active"):
+            raise ValueError("Character upgrades and equipment changes are locked during combat.")
+
+        if action_type == "generate_abilities":
+            choices = available_to_learn(player, generate_ability_choices(GAME_MASTER.provider, player))
+            CHARACTER_HUB_SESSION["ability_choices"] = deepcopy(choices)
+            return _character_hub_response("Generated new abilities that fit your character.")
+
+        if action_type == "learn_ability":
+            choices = CHARACTER_HUB_SESSION.get("ability_choices")
+            if not isinstance(choices, list) or not choices:
+                raise ValueError("Generate ability choices first.")
+            choice_index = int(payload.get("choice_index", -1))
+            if choice_index < 0 or choice_index >= len(choices):
+                raise ValueError("That ability choice is no longer available.")
+            raw_forget = payload.get("forget_index")
+            forget_index = int(raw_forget) if isinstance(raw_forget, (int, float)) and int(raw_forget) >= 0 else None
+            learned = learn_ability(player, choices[choice_index], forget_index)
+            learned_name = str(learned.get("learned", {}).get("name") or "ability")
+            CHARACTER_HUB_SESSION["ability_choices"] = [
+                deepcopy(choice) for index, choice in enumerate(choices) if index != choice_index
+            ]
+            GAME_MASTER.state.save()
+            return _character_hub_response(f"Learned {learned_name}.", learned=learned)
+
+        if action_type == "spend_sp":
+            changed = spend_stat_point(GAME_MASTER, str(payload.get("stat") or ""), int(payload.get("amount", 1) or 1))
+            return _character_hub_response(
+                f"Raised {str(changed.get('stat')).title()} to {changed.get('after')}. Click again to spend another SP.",
+                upgrade=changed,
+            )
+
+        if action_type == "equip_armor":
+            changed = equip_armor_from_inventory(GAME_MASTER, int(payload.get("inventory_index", -1)))
+            piece_name = str(changed.get("equipped", {}).get("name") or "armor")
+            return _character_hub_response(f"Equipped {piece_name}.", equipment_change=changed)
+
+        if action_type == "unequip_armor":
+            changed = unequip_armor_slot(GAME_MASTER, str(payload.get("slot") or ""))
+            piece_name = str(changed.get("unequipped", {}).get("name") or "armor")
+            return _character_hub_response(f"Unequipped {piece_name}.", equipment_change=changed)
+
+        raise ValueError("Unknown Character Hub action.")
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ShatteredRealmsAPI/0.3"
 
@@ -684,6 +789,9 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/health":
                     self._send(200, {"ok": True, "service": "the-shattered-realms"})
                     return
+                if self.path == "/character/hub":
+                    self._send(200, _character_hub_response())
+                    return
                 if self.path in {"/", "/session", "/state"}:
                     self._send(200, _session_payload())
                     return
@@ -699,6 +807,20 @@ class Handler(BaseHTTPRequestHandler):
                     result = _handle_action(str(payload.get("action") or ""))
                 elif self.path == "/roll":
                     result = _handle_roll()
+                elif self.path == "/character/abilities/generate":
+                    result = _character_hub_action(payload, "generate_abilities")
+                elif self.path == "/character/abilities/learn":
+                    result = _character_hub_action(payload, "learn_ability")
+                elif self.path == "/character/stats/spend":
+                    result = _character_hub_action(payload, "spend_sp")
+                elif self.path == "/character/armor/equip":
+                    result = _character_hub_action(payload, "equip_armor")
+                elif self.path == "/character/armor/unequip":
+                    result = _character_hub_action(payload, "unequip_armor")
+                elif self.path == "/character/portrait/load":
+                    result = _character_hub_action(payload, "load_portrait")
+                elif self.path == "/character/portrait/generate":
+                    result = _character_hub_action(payload, "generate_portrait")
                 elif self.path == "/world/area/generate":
                     result = _world_area_payload(payload)
                 elif self.path == "/prototype/battle/start":
