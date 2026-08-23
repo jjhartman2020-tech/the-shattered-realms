@@ -38,13 +38,26 @@ var rock_tiles: Array[Vector2i] = []
 var flower_tiles: Array[Vector2i] = []
 var lamp_tiles: Array[Vector2i] = []
 var tech_world: bool = false
+var current_area: Dictionary = {}
+var area_landmarks: Array = []
+var area_npcs: Array = []
+var landmark_doors: Dictionary = {}
+var area_palette: String = "lush"
+var ground_style: String = "grass"
+var visual_features: Array = []
+var area_loaded: bool = false
+var pending_exit_direction: String = ""
 
 var title_label: Label
 var subtitle_label: Label
 var hint_label: Label
 var dialogue_panel: PanelContainer
 var dialogue_label: RichTextLabel
-var dialogue_choices: HBoxContainer
+var dialogue_choices: VBoxContainer
+var suggestion_row: HBoxContainer
+var custom_action_input: LineEdit
+var custom_action_button: Button
+var suggestion_buttons: Array[Button] = []
 var battle_panel: PanelContainer
 var battle_actions: VBoxContainer
 var status_label: Label
@@ -79,6 +92,7 @@ func show_from_payload(payload: Dictionary = {}) -> void:
 		game_state = payload.get("state", {})
 	elif not payload.is_empty() and payload.get("player") is Dictionary:
 		game_state = payload
+	_apply_area_from_state()
 	_update_world_theme()
 	var combat: Dictionary = _combat()
 	mode = "battle" if bool(combat.get("active", false)) else "explore"
@@ -88,9 +102,11 @@ func show_from_payload(payload: Dictionary = {}) -> void:
 	_refresh_mode_interface()
 	var narration: String = str(payload.get("narration", "")).strip_edges()
 	if not narration.is_empty():
-		_set_message(narration)
+		_set_message(narration, payload.get("suggested_actions", []))
 	elif mode == "explore":
 		_hide_dialogue()
+	if mode == "explore" and not area_loaded and not busy:
+		call_deferred("_request_world_area", "current")
 	queue_redraw()
 
 
@@ -134,7 +150,7 @@ func _build_interface() -> void:
 	dialogue_panel = PanelContainer.new()
 	dialogue_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	dialogue_panel.offset_left = 72.0
-	dialogue_panel.offset_top = -172.0
+	dialogue_panel.offset_top = -228.0
 	dialogue_panel.offset_right = -72.0
 	dialogue_panel.offset_bottom = -24.0
 	dialogue_panel.add_theme_stylebox_override("panel", _panel_style(Color("#16251f"), INK, 4))
@@ -149,21 +165,38 @@ func _build_interface() -> void:
 	dialogue_stack.add_theme_constant_override("separation", 8)
 	dialogue_margin.add_child(dialogue_stack)
 	dialogue_label = RichTextLabel.new()
-	dialogue_label.custom_minimum_size = Vector2(0, 70)
+	dialogue_label.custom_minimum_size = Vector2(0, 72)
 	dialogue_label.bbcode_enabled = true
 	dialogue_label.fit_content = false
 	dialogue_label.scroll_active = true
 	dialogue_label.add_theme_font_size_override("normal_font_size", 17)
 	dialogue_label.add_theme_color_override("default_color", INK)
 	dialogue_stack.add_child(dialogue_label)
-	dialogue_choices = HBoxContainer.new()
-	dialogue_choices.alignment = BoxContainer.ALIGNMENT_CENTER
-	dialogue_choices.add_theme_constant_override("separation", 10)
+	dialogue_choices = VBoxContainer.new()
+	dialogue_choices.add_theme_constant_override("separation", 8)
 	dialogue_stack.add_child(dialogue_choices)
-	dialogue_choices.add_child(_action_button("ASK ABOUT HERE", _ask_about_place, 190))
-	dialogue_choices.add_child(_action_button("ASK FOR WORK", _ask_for_work, 170))
-	dialogue_choices.add_child(_action_button("TRAIN", _start_training_battle, 130))
-	dialogue_choices.add_child(_action_button("CLOSE", _hide_dialogue, 120))
+	suggestion_row = HBoxContainer.new()
+	suggestion_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	suggestion_row.add_theme_constant_override("separation", 8)
+	dialogue_choices.add_child(suggestion_row)
+	for index in range(3):
+		var suggestion := _action_button("OPTION %d" % (index + 1), _choose_suggestion.bind(index))
+		suggestion.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		suggestion.custom_minimum_size.y = 42
+		suggestion_buttons.append(suggestion)
+		suggestion_row.add_child(suggestion)
+	var custom_row := HBoxContainer.new()
+	custom_row.add_theme_constant_override("separation", 8)
+	dialogue_choices.add_child(custom_row)
+	custom_action_input = LineEdit.new()
+	custom_action_input.placeholder_text = "Or type anything you want to do..."
+	custom_action_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	custom_action_input.custom_minimum_size.y = 40
+	custom_action_input.text_submitted.connect(_submit_custom_action)
+	custom_row.add_child(custom_action_input)
+	custom_action_button = _action_button("DO IT", _submit_custom_action_from_button, 120)
+	custom_row.add_child(custom_action_button)
+	custom_row.add_child(_action_button("CLOSE", _hide_dialogue, 100))
 	dialogue_panel.visible = false
 	dialogue_choices.visible = false
 
@@ -233,49 +266,122 @@ func _action_button(label_text: String, callback: Callable, minimum_width: int =
 
 
 func _build_world() -> void:
-	tree_tiles = [
-		Vector2i(2, 3), Vector2i(3, 3), Vector2i(4, 3), Vector2i(14, 3), Vector2i(15, 3),
-		Vector2i(2, 4), Vector2i(14, 4), Vector2i(42, 4), Vector2i(43, 4), Vector2i(44, 4),
-		Vector2i(16, 5), Vector2i(24, 5), Vector2i(42, 5), Vector2i(45, 5),
-		Vector2i(16, 6), Vector2i(24, 6), Vector2i(40, 7), Vector2i(41, 7), Vector2i(45, 7),
-		Vector2i(3, 14), Vector2i(4, 14), Vector2i(7, 14), Vector2i(12, 15), Vector2i(13, 15),
-		Vector2i(3, 16), Vector2i(44, 15), Vector2i(45, 15), Vector2i(5, 25), Vector2i(6, 25),
-		Vector2i(9, 27), Vector2i(10, 27), Vector2i(15, 29), Vector2i(16, 29), Vector2i(38, 27),
-		Vector2i(39, 27), Vector2i(43, 28), Vector2i(44, 28), Vector2i(45, 28),
-	]
-	rock_tiles = [Vector2i(14, 12), Vector2i(43, 11), Vector2i(8, 24), Vector2i(41, 25)]
-	flower_tiles = [Vector2i(20, 15), Vector2i(22, 17), Vector2i(11, 19), Vector2i(39, 21), Vector2i(19, 25), Vector2i(29, 26)]
-	lamp_tiles = [Vector2i(22, 19), Vector2i(28, 19), Vector2i(30, 22), Vector2i(38, 22)]
+	if current_area.is_empty():
+		current_area = {
+			"seed": 1337,
+			"name": "Generating Area",
+			"palette": "lush",
+			"ground_style": "grass",
+			"visual_features": ["trees", "flowers", "rocks", "water"],
+			"landmarks": [
+				{"name": "Waypoint", "type": "station", "x": 30, "y": 12, "width": 9, "height": 7, "interaction_prompt": "I inspect the waypoint."},
+				{"name": "Supply Post", "type": "shop", "x": 15, "y": 6, "width": 7, "height": 5, "interaction_prompt": "I inspect the supply post."},
+			],
+			"npcs": [
+				{"name": "Local Guide", "role": "guide", "x": 28, "y": 21, "look": "friendly local clothing"},
+			],
+		}
+	area_palette = str(current_area.get("palette", "lush")).to_lower()
+	ground_style = str(current_area.get("ground_style", "grass")).to_lower()
+	visual_features = current_area.get("visual_features", []) if current_area.get("visual_features") is Array else []
+	area_landmarks = current_area.get("landmarks", []) if current_area.get("landmarks") is Array else []
+	area_npcs = current_area.get("npcs", []) if current_area.get("npcs") is Array else []
+	tree_tiles.clear()
+	rock_tiles.clear()
+	flower_tiles.clear()
+	lamp_tiles.clear()
+	landmark_doors.clear()
 	blocked.clear()
-	for x in range(WORLD_COLS):
-		blocked[Vector2i(x, 0)] = true
-		blocked[Vector2i(x, WORLD_ROWS - 1)] = true
-	for y in range(WORLD_ROWS):
-		blocked[Vector2i(0, y)] = true
-		blocked[Vector2i(WORLD_COLS - 1, y)] = true
-	for y in range(5, 12):
-		for x in range(4, 14):
-			if not ((x == 4 or x == 13) and (y == 5 or y == 11)):
+
+	for landmark_value in area_landmarks:
+		if not landmark_value is Dictionary:
+			continue
+		var landmark: Dictionary = landmark_value
+		var left: int = int(landmark.get("x", 30))
+		var top: int = int(landmark.get("y", 11))
+		var width: int = maxi(5, int(landmark.get("width", 8)))
+		var height: int = maxi(4, int(landmark.get("height", 6)))
+		for y in range(top, mini(WORLD_ROWS, top + height)):
+			for x in range(left, mini(WORLD_COLS, left + width)):
 				blocked[Vector2i(x, y)] = true
-	for y in range(12, 19):
-		for x in range(30, 39):
-			blocked[Vector2i(x, y)] = true
-	for y in range(6, 11):
-		for x in range(15, 22):
-			blocked[Vector2i(x, y)] = true
+		var door := Vector2i(left + int(width / 2), top + height - 1)
+		landmark_doors[door] = landmark
+
+	if not area_npcs.is_empty() and area_npcs[0] is Dictionary:
+		npc_tile = Vector2i(int(area_npcs[0].get("x", 28)), int(area_npcs[0].get("y", 21)))
+
+	if _feature_enabled("water") or _feature_enabled("river") or _feature_enabled("pond"):
+		for y in range(5, 12):
+			for x in range(4, 14):
+				if not ((x == 4 or x == 13) and (y == 5 or y == 11)):
+					blocked[Vector2i(x, y)] = true
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(current_area.get("seed", 1337))
+	var tree_count: int = 42 if _feature_enabled("trees") or _feature_enabled("snow_pines") else 10
+	var rock_count: int = 12 if _feature_enabled("rocks") or _feature_enabled("crystals") or _feature_enabled("cactus") else 5
+	var flower_count: int = 24 if _feature_enabled("flowers") or _feature_enabled("coral") else 7
+	var lamp_count: int = 12 if _feature_enabled("street_lights") or _feature_enabled("holograms") else 0
+	_scatter_tiles(rng, tree_tiles, tree_count, true)
+	_scatter_tiles(rng, rock_tiles, rock_count, true)
+	_scatter_tiles(rng, flower_tiles, flower_count, false)
+	_scatter_tiles(rng, lamp_tiles, lamp_count, false)
 	for tile in tree_tiles:
 		blocked[tile] = true
 	for tile in rock_tiles:
 		blocked[tile] = true
 
 
+func _scatter_tiles(rng: RandomNumberGenerator, target: Array[Vector2i], count: int, needs_clear_space: bool) -> void:
+	var attempts: int = 0
+	while target.size() < count and attempts < count * 30 + 30:
+		attempts += 1
+		var tile := Vector2i(rng.randi_range(2, WORLD_COLS - 3), rng.randi_range(2, WORLD_ROWS - 3))
+		if _is_path(tile) or blocked.has(tile) or not _npc_at(tile).is_empty():
+			continue
+		if needs_clear_space and _near_map_exit(tile):
+			continue
+		if tile in tree_tiles or tile in rock_tiles or tile in flower_tiles or tile in lamp_tiles:
+			continue
+		target.append(tile)
+
+
+func _near_map_exit(tile: Vector2i) -> bool:
+	var center_x: int = int(WORLD_COLS / 2)
+	var center_y: int = 21
+	return ((tile.x <= 3 or tile.x >= WORLD_COLS - 4) and absi(tile.y - center_y) <= 3) or ((tile.y <= 3 or tile.y >= WORLD_ROWS - 4) and absi(tile.x - center_x) <= 3)
+
+
+func _feature_enabled(feature_name: String) -> bool:
+	return feature_name in visual_features
+
+
+func _apply_area_from_state() -> void:
+	var exploration: Dictionary = game_state.get("exploration", {}) if game_state.get("exploration") is Dictionary else {}
+	var saved_area: Dictionary = exploration.get("current_area", {}) if exploration.get("current_area") is Dictionary else {}
+	if not saved_area.is_empty():
+		_apply_area(saved_area)
+
+
+func _apply_area(area: Dictionary) -> void:
+	current_area = area.duplicate(true)
+	area_loaded = true
+	_update_world_theme()
+	_build_world()
+	_update_header()
+	queue_redraw()
+
+
 func _update_world_theme() -> void:
+	area_palette = str(current_area.get("palette", area_palette)).to_lower()
+	ground_style = str(current_area.get("ground_style", ground_style)).to_lower()
 	var world_text: String = JSON.stringify(game_state.get("world_profile", {})).to_lower()
-	tech_world = false
-	for word in ["cyber", "sci-fi", "science fiction", "space", "neon", "future", "technology", "starship"]:
-		if world_text.contains(word):
-			tech_world = true
-			break
+	tech_world = area_palette in ["neon", "cosmic", "urban"] or ground_style in ["metal", "pavement"]
+	if not tech_world:
+		for word in ["cyber", "sci-fi", "science fiction", "space", "neon", "future", "technology", "starship"]:
+			if world_text.contains(word):
+				tech_world = true
+				break
 
 
 func _draw() -> void:
@@ -306,8 +412,13 @@ func _draw_overworld() -> void:
 	for y in range(start_y, end_y):
 		for x in range(start_x, end_x):
 			_draw_ground(Vector2i(x, y), origin)
-	_draw_building(Vector2i(30, 12), Vector2i(9, 7), origin, "WAYPOINT")
-	_draw_building(Vector2i(15, 6), Vector2i(7, 5), origin, "SUPPLY")
+	for landmark_value in area_landmarks:
+		if not landmark_value is Dictionary:
+			continue
+		var landmark: Dictionary = landmark_value
+		var landmark_tile := Vector2i(int(landmark.get("x", 30)), int(landmark.get("y", 11)))
+		var footprint := Vector2i(int(landmark.get("width", 8)), int(landmark.get("height", 6)))
+		_draw_building(landmark_tile, footprint, origin, str(landmark.get("name", "LANDMARK")), str(landmark.get("type", "house")))
 	for tile in flower_tiles:
 		_draw_flower(tile, origin)
 	for tile in rock_tiles:
@@ -316,65 +427,101 @@ func _draw_overworld() -> void:
 		_draw_lamp(tile, origin)
 	for tile in tree_tiles:
 		_draw_tree(tile, origin)
-	_draw_character(npc_tile, origin, false)
+	var npc_index: int = 0
+	for npc_value in area_npcs:
+		if not npc_value is Dictionary:
+			continue
+		var npc: Dictionary = npc_value
+		_draw_character(Vector2i(int(npc.get("x", 28)), int(npc.get("y", 21))), origin, false, npc_index)
+		npc_index += 1
 	_draw_character(Vector2i.ZERO, origin, true)
 
 
 func _draw_ground(tile: Vector2i, origin: Vector2) -> void:
 	var rect: Rect2 = _world_rect(tile, origin)
 	if _is_water(tile):
-		draw_rect(rect, Color("#3f7480") if tech_world else Color("#4d8292"))
+		draw_rect(rect, _palette_color("water"))
 		var wave_shift: float = float((tile.x * 7 + tile.y * 11) % 13)
-		draw_rect(Rect2(rect.position + Vector2(4 + wave_shift * 0.25, 9), Vector2(12, 2)), Color("#77a8a2"))
-		draw_rect(Rect2(rect.position + Vector2(14 - wave_shift * 0.2, 22), Vector2(10, 2)), Color("#315d69"))
+		draw_rect(Rect2(rect.position + Vector2(4 + wave_shift * 0.25, 9), Vector2(12, 3)), _palette_color("water_light"))
+		draw_rect(Rect2(rect.position + Vector2(14 - wave_shift * 0.2, 22), Vector2(10, 2)), _palette_color("water").darkened(0.18))
 		return
 	if _is_path(tile):
-		var path_color := Color("#a9a06a") if tech_world else Color("#b6a36b")
+		var path_color: Color = _palette_color("path")
 		draw_rect(rect, path_color)
-		var grit: Color = path_color.darkened(0.13)
+		var grit: Color = _palette_color("path_detail")
 		if (tile.x * 5 + tile.y * 3) % 4 == 0:
-			draw_rect(Rect2(rect.position + Vector2(6, 8), Vector2(3, 2)), grit)
-			draw_rect(Rect2(rect.position + Vector2(23, 24), Vector2(2, 2)), grit)
-		if tech_world and tile.y in [20, 22]:
-			draw_rect(Rect2(rect.position + Vector2(0, 1 if tile.y == 20 else 29), Vector2(TILE, 2)), Color("#7c8362"))
+			draw_circle(rect.position + Vector2(7, 9), 2.0, grit)
+			draw_circle(rect.position + Vector2(24, 24), 1.5, grit)
+		if ground_style in ["metal", "pavement"]:
+			draw_rect(Rect2(rect.position + Vector2(0, 2), Vector2(TILE, 2)), grit.lightened(0.12))
 		return
-	var grass := Color("#668d52") if (tile.x + tile.y) % 2 == 0 else Color("#6f9658")
-	if tech_world:
-		grass = Color("#557a55") if (tile.x + tile.y) % 2 == 0 else Color("#5e835d")
-	draw_rect(rect, grass)
-	var detail: Color = grass.darkened(0.12)
+	var ground: Color = _palette_color("ground_a") if (tile.x + tile.y) % 2 == 0 else _palette_color("ground_b")
+	draw_rect(rect, ground)
+	var detail: Color = ground.darkened(0.1)
 	var seed: int = (tile.x * 29 + tile.y * 47) % 17
-	if seed in [1, 6, 12]:
+	if ground_style in ["metal", "pavement"]:
+		draw_line(rect.position + Vector2(0, 31), rect.position + Vector2(32, 31), detail, 1.0)
+		draw_line(rect.position + Vector2(31, 0), rect.position + Vector2(31, 32), detail, 1.0)
+		if seed in [3, 9]:
+			draw_circle(rect.position + Vector2(7, 7), 2.0, _palette_color("accent"))
+	elif seed in [1, 6, 12]:
 		draw_rect(Rect2(rect.position + Vector2(7, 10), Vector2(2, 5)), detail)
 		draw_rect(Rect2(rect.position + Vector2(5, 12), Vector2(2, 2)), detail)
-	if seed in [3, 9]:
+	elif seed in [3, 9]:
 		draw_rect(Rect2(rect.position + Vector2(22, 23), Vector2(5, 2)), detail)
 
 
 func _is_path(tile: Vector2i) -> bool:
 	if tile.y >= 20 and tile.y <= 22:
 		return true
-	if tile.x >= 24 and tile.x <= 26 and tile.y >= 10:
+	if tile.x >= 24 and tile.x <= 26:
 		return true
 	if tile.x >= 27 and tile.x <= 40 and tile.y >= 18 and tile.y <= 22:
 		return true
 	if tile.x >= 12 and tile.x <= 23 and tile.y >= 18 and tile.y <= 20:
 		return true
+	for door_value in landmark_doors.keys():
+		if not door_value is Vector2i:
+			continue
+		var door: Vector2i = door_value
+		var walkway_y: int = mini(WORLD_ROWS - 2, door.y + 1)
+		if tile.y == walkway_y and tile.x >= mini(door.x, 25) and tile.x <= maxi(door.x, 25):
+			return true
+		if tile.x == door.x and tile.y >= mini(walkway_y, 21) and tile.y <= maxi(walkway_y, 21):
+			return true
 	return false
 
 
 func _is_water(tile: Vector2i) -> bool:
+	if not (_feature_enabled("water") or _feature_enabled("river") or _feature_enabled("pond") or _feature_enabled("coral")):
+		return false
 	if tile.x < 4 or tile.x > 13 or tile.y < 5 or tile.y > 11:
 		return false
 	return not ((tile.x == 4 or tile.x == 13) and (tile.y == 5 or tile.y == 11))
 
 
-func _draw_building(top_left: Vector2i, footprint: Vector2i, origin: Vector2, sign_text: String) -> void:
+func _palette_color(role: String) -> Color:
+	var palette: Dictionary = {
+		"lush": {"ground_a": "#72c95a", "ground_b": "#7ed665", "path": "#f0c96f", "path_detail": "#cf9e52", "water": "#45a8df", "water_light": "#8ee8ed", "roof": "#ef6f61", "wall": "#ffe0a1", "accent": "#fff179", "leaf_dark": "#218c55", "leaf_light": "#47c96d", "flower": "#ff76a8"},
+		"bright": {"ground_a": "#75c86c", "ground_b": "#86d67c", "path": "#e8c580", "path_detail": "#c89b5d", "water": "#42a9df", "water_light": "#9cebf1", "roof": "#ef6767", "wall": "#f8dfb1", "accent": "#ffe46b", "leaf_dark": "#278a57", "leaf_light": "#55c875", "flower": "#f576ba"},
+		"desert": {"ground_a": "#efbd65", "ground_b": "#f5ca72", "path": "#d9964d", "path_detail": "#b9703b", "water": "#36a6c9", "water_light": "#8be3dc", "roof": "#d85d47", "wall": "#f2d39b", "accent": "#ffd96a", "leaf_dark": "#3d9258", "leaf_light": "#69bc60", "flower": "#f05d87"},
+		"ice": {"ground_a": "#c8eff1", "ground_b": "#ddf7f4", "path": "#9fc8d3", "path_detail": "#74aab9", "water": "#428dd0", "water_light": "#9cecff", "roof": "#755fd4", "wall": "#e9f6f4", "accent": "#76f3ee", "leaf_dark": "#357a91", "leaf_light": "#63b6bd", "flower": "#d887e8"},
+		"urban": {"ground_a": "#7ca46d", "ground_b": "#88b477", "path": "#9aa3a7", "path_detail": "#747e84", "water": "#3f8fb2", "water_light": "#76cfda", "roof": "#e36355", "wall": "#d8d0b9", "accent": "#ffcf57", "leaf_dark": "#276c4c", "leaf_light": "#4da66b", "flower": "#ef779d"},
+		"neon": {"ground_a": "#384f54", "ground_b": "#425d60", "path": "#58656d", "path_detail": "#29d9c2", "water": "#256fa4", "water_light": "#49e5d1", "roof": "#7d4fd4", "wall": "#465b69", "accent": "#f36bdc", "leaf_dark": "#17795c", "leaf_light": "#29c983", "flower": "#ff67d3"},
+		"cosmic": {"ground_a": "#313754", "ground_b": "#394263", "path": "#59647c", "path_detail": "#6ce5e0", "water": "#426fc4", "water_light": "#82e9ff", "roof": "#804cce", "wall": "#6f7895", "accent": "#f5dc66", "leaf_dark": "#257b72", "leaf_light": "#42d1ae", "flower": "#f46fe2"},
+		"ocean": {"ground_a": "#58c6aa", "ground_b": "#64d3b2", "path": "#f2d385", "path_detail": "#cca95d", "water": "#258ed0", "water_light": "#75e3ee", "roof": "#ef7258", "wall": "#f2e0b1", "accent": "#fff073", "leaf_dark": "#147d61", "leaf_light": "#39b982", "flower": "#ff807c"},
+		"volcanic": {"ground_a": "#5a4b4b", "ground_b": "#665454", "path": "#77615b", "path_detail": "#e85f3f", "water": "#e64f38", "water_light": "#ffb34d", "roof": "#702f3d", "wall": "#a47b68", "accent": "#ffca4b", "leaf_dark": "#46533e", "leaf_light": "#718056", "flower": "#ff754e"},
+	}
+	var selected: Dictionary = palette.get(area_palette, palette["lush"])
+	return Color(str(selected.get(role, "#ffffff")))
+
+
+func _draw_building(top_left: Vector2i, footprint: Vector2i, origin: Vector2, sign_text: String, landmark_type: String = "house") -> void:
 	var pos: Vector2 = origin + Vector2(top_left) * TILE
 	var building_size := Vector2(float(footprint.x) * TILE, float(footprint.y) * TILE)
-	var roof_color := Color("#35495c") if tech_world else Color("#765049")
-	var roof_light := Color("#49647b") if tech_world else Color("#92675a")
-	var wall_color := Color("#536d70") if tech_world else Color("#c09b70")
+	var roof_color := _palette_color("roof")
+	var roof_light: Color = roof_color.lightened(0.18)
+	var wall_color := _palette_color("wall")
 	draw_rect(Rect2(pos + Vector2(3, 6), building_size - Vector2(6, 6)), OUTLINE)
 	draw_rect(Rect2(pos + Vector2(7, 46), building_size - Vector2(14, 53)), wall_color)
 	draw_rect(Rect2(pos, Vector2(building_size.x, 52)), roof_color)
@@ -392,35 +539,70 @@ func _draw_building(top_left: Vector2i, footprint: Vector2i, origin: Vector2, si
 		draw_rect(Rect2(pos + Vector2(door_x + 8, building_size.y - 31), Vector2(14, 3)), Color("#75e3d4"))
 	var sign_width: float = minf(building_size.x - 50.0, float(sign_text.length()) * 11.0 + 22.0)
 	draw_rect(Rect2(pos + Vector2(building_size.x * 0.5 - sign_width * 0.5, 48), Vector2(sign_width, 26)), OUTLINE)
-	draw_string(ThemeDB.fallback_font, pos + Vector2(building_size.x * 0.5 - sign_width * 0.5 + 10, 67), sign_text, HORIZONTAL_ALIGNMENT_LEFT, sign_width - 20.0, 13, Color("#7ff0d8") if tech_world else INK)
+	draw_string(ThemeDB.fallback_font, pos + Vector2(building_size.x * 0.5 - sign_width * 0.5 + 10, 67), sign_text.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, sign_width - 20.0, 13, _palette_color("accent"))
+	var emblem_center := pos + Vector2(building_size.x - 30, 32)
+	draw_circle(emblem_center, 13.0, OUTLINE)
+	draw_circle(emblem_center, 9.0, _palette_color("accent"))
+	var emblem: String = "✦" if landmark_type in ["starport", "hangar", "station"] else "●"
+	draw_string(ThemeDB.fallback_font, emblem_center + Vector2(-5, 5), emblem, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, OUTLINE)
 
 
 func _draw_tree(tile: Vector2i, origin: Vector2) -> void:
 	var pos: Vector2 = origin + Vector2(tile) * TILE
-	draw_rect(Rect2(pos + Vector2(13, 19), Vector2(7, 13)), Color("#5b4531"))
-	draw_rect(Rect2(pos + Vector2(7, 6), Vector2(19, 20)), OUTLINE)
-	var leaf_dark := Color("#1d4d3c") if tech_world else Color("#28563a")
-	var leaf_light := Color("#34705a") if tech_world else Color("#3f7445")
-	draw_rect(Rect2(pos + Vector2(9, 4), Vector2(15, 5)), leaf_dark)
-	draw_rect(Rect2(pos + Vector2(5, 9), Vector2(23, 13)), leaf_dark)
-	draw_rect(Rect2(pos + Vector2(9, 8), Vector2(11, 8)), leaf_light)
-	draw_rect(Rect2(pos + Vector2(22, 12), Vector2(4, 6)), leaf_light)
+	draw_circle(pos + Vector2(16, 29), 9.0, Color(0.06, 0.12, 0.1, 0.26))
+	draw_rect(Rect2(pos + Vector2(13, 17), Vector2(7, 15)), OUTLINE)
+	draw_rect(Rect2(pos + Vector2(15, 18), Vector2(4, 14)), Color("#8a5638"))
+	var leaf_dark: Color = _palette_color("leaf_dark")
+	var leaf_light: Color = _palette_color("leaf_light")
+	if _feature_enabled("snow_pines"):
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(16, 1), pos + Vector2(3, 22), pos + Vector2(29, 22)]), OUTLINE)
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(16, 4), pos + Vector2(6, 20), pos + Vector2(26, 20)]), leaf_dark)
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(16, 5), pos + Vector2(11, 13), pos + Vector2(22, 13)]), Color("#eefcfa"))
+		return
+	draw_circle(pos + Vector2(10, 14), 9.0, OUTLINE)
+	draw_circle(pos + Vector2(22, 13), 10.0, OUTLINE)
+	draw_circle(pos + Vector2(16, 8), 10.0, OUTLINE)
+	draw_circle(pos + Vector2(10, 14), 6.5, leaf_dark)
+	draw_circle(pos + Vector2(22, 13), 7.5, leaf_dark)
+	draw_circle(pos + Vector2(16, 8), 7.5, leaf_light)
+	draw_circle(pos + Vector2(13, 7), 2.5, leaf_light.lightened(0.25))
 
 
 func _draw_rock(tile: Vector2i, origin: Vector2) -> void:
 	var pos: Vector2 = origin + Vector2(tile) * TILE
-	draw_rect(Rect2(pos + Vector2(7, 14), Vector2(20, 13)), OUTLINE)
-	draw_rect(Rect2(pos + Vector2(10, 11), Vector2(14, 13)), Color("#6f8179"))
-	draw_rect(Rect2(pos + Vector2(12, 13), Vector2(7, 3)), Color("#93a094"))
+	draw_circle(pos + Vector2(16, 27), 10.0, Color(0.06, 0.1, 0.1, 0.2))
+	if _feature_enabled("cactus"):
+		draw_rect(Rect2(pos + Vector2(12, 5), Vector2(10, 25)), OUTLINE)
+		draw_rect(Rect2(pos + Vector2(15, 7), Vector2(5, 22)), _palette_color("leaf_light"))
+		draw_rect(Rect2(pos + Vector2(6, 13), Vector2(10, 7)), OUTLINE)
+		draw_rect(Rect2(pos + Vector2(8, 14), Vector2(7, 4)), _palette_color("leaf_light"))
+		draw_circle(pos + Vector2(17, 7), 5.0, _palette_color("leaf_light"))
+		return
+	if _feature_enabled("crystals"):
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(5, 27), pos + Vector2(11, 8), pos + Vector2(17, 27)]), OUTLINE)
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(8, 25), pos + Vector2(11, 11), pos + Vector2(14, 25)]), _palette_color("accent"))
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(13, 28), pos + Vector2(22, 5), pos + Vector2(28, 28)]), OUTLINE)
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(17, 26), pos + Vector2(22, 9), pos + Vector2(25, 26)]), _palette_color("water_light"))
+		return
+	if _feature_enabled("metal_crates"):
+		draw_rect(Rect2(pos + Vector2(5, 8), Vector2(24, 22)), OUTLINE)
+		draw_rect(Rect2(pos + Vector2(8, 11), Vector2(18, 16)), _palette_color("wall"))
+		draw_line(pos + Vector2(9, 12), pos + Vector2(25, 26), _palette_color("accent"), 3.0)
+		draw_line(pos + Vector2(25, 12), pos + Vector2(9, 26), _palette_color("accent"), 3.0)
+		return
+	draw_circle(pos + Vector2(16, 21), 11.0, OUTLINE)
+	draw_circle(pos + Vector2(16, 20), 8.0, Color("#87969a"))
+	draw_circle(pos + Vector2(13, 16), 3.0, Color("#bbc5c2"))
 
 
 func _draw_flower(tile: Vector2i, origin: Vector2) -> void:
 	var pos: Vector2 = origin + Vector2(tile) * TILE
-	var bloom := Color("#db7479") if tech_world else Color("#f0cc6b")
+	var bloom: Color = _palette_color("flower")
 	draw_rect(Rect2(pos + Vector2(15, 15), Vector2(2, 9)), Color("#315b3c"))
-	draw_rect(Rect2(pos + Vector2(11, 11), Vector2(5, 5)), bloom)
-	draw_rect(Rect2(pos + Vector2(17, 11), Vector2(5, 5)), bloom)
-	draw_rect(Rect2(pos + Vector2(14, 9), Vector2(5, 5)), bloom)
+	draw_circle(pos + Vector2(12, 13), 4.0, bloom)
+	draw_circle(pos + Vector2(20, 13), 4.0, bloom)
+	draw_circle(pos + Vector2(16, 9), 4.0, bloom.lightened(0.15))
+	draw_circle(pos + Vector2(16, 14), 3.0, _palette_color("accent"))
 
 
 func _draw_lamp(tile: Vector2i, origin: Vector2) -> void:
@@ -430,33 +612,37 @@ func _draw_lamp(tile: Vector2i, origin: Vector2) -> void:
 	draw_rect(Rect2(pos + Vector2(11, 9), Vector2(10, 4)), Color("#82ebd6") if tech_world else Color("#f2d36b"))
 
 
-func _draw_character(tile: Vector2i, origin: Vector2, is_player: bool) -> void:
+func _draw_character(tile: Vector2i, origin: Vector2, is_player: bool, variant: int = 0) -> void:
 	var world_position: Vector2 = player_visual if is_player else Vector2(tile)
 	var pos: Vector2 = origin + world_position * TILE
-	var body_color := Color("#304f65") if is_player else Color("#a44f4b")
-	var body_light := Color("#4f7790") if is_player else Color("#cf6b5e")
-	var hair_color := _player_hair_color() if is_player else Color("#50352d")
-	var skin_color := Color("#d8a775")
-	draw_rect(Rect2(pos + Vector2(7, 26), Vector2(18, 5)), Color(0.05, 0.1, 0.08, 0.45))
+	var npc_colors: Array[Color] = [Color("#e9576f"), Color("#4e8ee8"), Color("#a864d8"), Color("#e89a45")]
+	var npc_hair_colors: Array[Color] = [Color("#593b34"), Color("#29364f"), Color("#70484d"), Color("#d6b058")]
+	var npc_skin_colors: Array[Color] = [Color("#e2aa78"), Color("#bd7b58"), Color("#f0c498"), Color("#8f5d4a")]
+	var body_color: Color = Color("#35a6d8") if is_player else npc_colors[variant % npc_colors.size()]
+	var body_light: Color = body_color.lightened(0.24)
+	var hair_color: Color = _player_hair_color() if is_player else npc_hair_colors[variant % npc_hair_colors.size()]
+	var skin_color: Color = npc_skin_colors[variant % npc_skin_colors.size()]
+	draw_circle(pos + Vector2(16, 28), 10.0, Color(0.05, 0.1, 0.08, 0.35))
 	var leg_shift: int = 2 if is_player and walk_frame == 1 else 0
 	draw_rect(Rect2(pos + Vector2(10 - leg_shift, 22), Vector2(5, 7)), OUTLINE)
 	draw_rect(Rect2(pos + Vector2(18 + leg_shift, 22), Vector2(5, 7)), OUTLINE)
-	draw_rect(Rect2(pos + Vector2(7, 12), Vector2(19, 13)), OUTLINE)
-	draw_rect(Rect2(pos + Vector2(9, 13), Vector2(15, 11)), body_color)
+	draw_circle(pos + Vector2(16, 19), 10.0, OUTLINE)
+	draw_circle(pos + Vector2(16, 19), 7.0, body_color)
 	draw_rect(Rect2(pos + Vector2(10, 13), Vector2(5, 8)), body_light)
-	draw_rect(Rect2(pos + Vector2(9, 3), Vector2(16, 12)), OUTLINE)
-	draw_rect(Rect2(pos + Vector2(11, 5), Vector2(12, 9)), skin_color)
+	draw_circle(pos + Vector2(17, 9), 9.0, OUTLINE)
+	draw_circle(pos + Vector2(17, 9), 6.0, skin_color)
 	if facing.y < 0 and is_player:
-		draw_rect(Rect2(pos + Vector2(10, 4), Vector2(14, 9)), hair_color)
+		draw_circle(pos + Vector2(17, 8), 7.0, hair_color)
 	else:
-		draw_rect(Rect2(pos + Vector2(10, 3), Vector2(14, 5)), hair_color)
-		draw_rect(Rect2(pos + Vector2(10, 7), Vector2(3, 5)), hair_color)
+		draw_rect(Rect2(pos + Vector2(11, 3), Vector2(12, 5)), hair_color)
+		draw_circle(pos + Vector2(13, 7), 4.0, hair_color)
 		if not (is_player and facing.y < 0):
-			draw_rect(Rect2(pos + Vector2(15, 9), Vector2(2, 2)), Color("#5d2b31") if is_player else OUTLINE)
-			draw_rect(Rect2(pos + Vector2(20, 9), Vector2(2, 2)), Color("#5d2b31") if is_player else OUTLINE)
+			draw_circle(pos + Vector2(15, 10), 1.5, OUTLINE)
+			draw_circle(pos + Vector2(20, 10), 1.5, OUTLINE)
+			draw_rect(Rect2(pos + Vector2(16, 13), Vector2(4, 1)), Color("#8f4d54"))
 	if not is_player:
-		draw_rect(Rect2(pos + Vector2(27, 1), Vector2(4, 12)), OUTLINE)
-		draw_rect(Rect2(pos + Vector2(28, 2), Vector2(2, 9)), Color("#f1d66c"))
+		draw_circle(pos + Vector2(28, 4), 5.0, OUTLINE)
+		draw_circle(pos + Vector2(28, 4), 3.0, _palette_color("accent"))
 
 
 func _player_hair_color() -> Color:
@@ -511,7 +697,19 @@ func _unhandled_input(event: InputEvent) -> void:
 func _move_player(direction: Vector2i) -> void:
 	facing = direction
 	var destination: Vector2i = player_tile + direction
-	if _is_blocked(destination) or destination == npc_tile:
+	if destination.x < 0:
+		_request_world_area("west")
+		return
+	if destination.x >= WORLD_COLS:
+		_request_world_area("east")
+		return
+	if destination.y < 0:
+		_request_world_area("north")
+		return
+	if destination.y >= WORLD_ROWS:
+		_request_world_area("south")
+		return
+	if _is_blocked(destination) or not _npc_at(destination).is_empty():
 		queue_redraw()
 		return
 	player_tile = destination
@@ -532,36 +730,56 @@ func _is_blocked(tile: Vector2i) -> bool:
 	return blocked.has(tile)
 
 
+func _npc_at(tile: Vector2i) -> Dictionary:
+	for npc_value in area_npcs:
+		if not npc_value is Dictionary:
+			continue
+		var npc: Dictionary = npc_value
+		if Vector2i(int(npc.get("x", -100)), int(npc.get("y", -100))) == tile:
+			return npc
+	return {}
+
+
+func _nearby_npc() -> Dictionary:
+	var front_npc: Dictionary = _npc_at(player_tile + facing)
+	if not front_npc.is_empty():
+		return front_npc
+	for npc_value in area_npcs:
+		if not npc_value is Dictionary:
+			continue
+		var npc: Dictionary = npc_value
+		var tile := Vector2i(int(npc.get("x", -100)), int(npc.get("y", -100)))
+		if _tile_distance(player_tile, tile) <= 1:
+			return npc
+	return {}
+
+
+func _request_world_area(direction: String) -> void:
+	if busy:
+		return
+	pending_exit_direction = direction
+	_post("/world/area/generate", {"direction": direction}, "world_area")
+
+
 func _interact() -> void:
 	if busy:
 		return
 	var front: Vector2i = player_tile + facing
-	if front == npc_tile or _tile_distance(player_tile, npc_tile) <= 1:
-		_set_message("The local guide looks ready to talk. What do you want to ask?", true)
+	var npc: Dictionary = _nearby_npc()
+	if not npc.is_empty():
+		var npc_name: String = str(npc.get("name", "the nearby person"))
+		var npc_role: String = str(npc.get("role", "local"))
+		_request_story("I speak with %s, a %s in %s. Give their short opening line, then three setting-appropriate things I could say or do next. Do not reveal hidden lore or distant events." % [npc_name, npc_role, str(current_area.get("name", "this area"))])
 		return
-	if front == primary_door or front == secondary_door:
-		_request_story("I open the door directly in front of me and enter. Describe only the first room and what is immediately visible. Keep secrets and distant locations hidden.")
+	if landmark_doors.has(front):
+		var landmark: Dictionary = landmark_doors[front]
+		var prompt: String = str(landmark.get("interaction_prompt", "I inspect and enter this place if possible."))
+		_request_story("%s Describe only what is immediately visible, then give three sensible things I can do. Keep secrets and distant locations hidden." % prompt)
+		return
+	if front in tree_tiles or front in rock_tiles or front in flower_tiles or front in lamp_tiles:
+		_request_story("I inspect the object directly in front of me in %s. Describe only what I can immediately notice, then give three sensible interactions that fit this world's rules." % str(current_area.get("name", "this area")))
 		return
 	_set_message("Nothing nearby demands your attention. Explore the paths and speak to people you meet.")
-
-
-func _ask_about_place() -> void:
-	if not _require_near_npc():
-		return
-	_request_story("I ask the nearby local about this immediate area. Give a brief useful answer without revealing hidden locations, future events, secret factions, or major surprises.")
-
-
-func _ask_for_work() -> void:
-	if not _require_near_npc():
-		return
-	_request_story("I ask the nearby local if there is one small problem close by that I could help with. Give one concise quest hook and keep all larger mysteries hidden.")
-
-
-func _require_near_npc() -> bool:
-	if _tile_distance(player_tile, npc_tile) <= 1:
-		return true
-	_set_message("You need to stand next to the local guide first.")
-	return false
 
 
 func _tile_distance(a: Vector2i, b: Vector2i) -> int:
@@ -572,6 +790,26 @@ func _request_story(action_text: String) -> void:
 	_post("/action", {"action": action_text}, "story")
 
 
+func _choose_suggestion(index: int) -> void:
+	if index < 0 or index >= suggestion_buttons.size():
+		return
+	var action_text: String = str(suggestion_buttons[index].get_meta("action_text", "")).strip_edges()
+	if not action_text.is_empty():
+		_request_story(action_text)
+
+
+func _submit_custom_action(text: String) -> void:
+	var clean: String = text.strip_edges()
+	if clean.is_empty() or busy:
+		return
+	custom_action_input.clear()
+	_request_story(clean)
+
+
+func _submit_custom_action_from_button() -> void:
+	_submit_custom_action(custom_action_input.text)
+
+
 func _start_training_battle() -> void:
 	_post("/prototype/battle/start", {}, "battle_start")
 
@@ -579,6 +817,7 @@ func _start_training_battle() -> void:
 func _hide_dialogue() -> void:
 	dialogue_panel.visible = false
 	dialogue_choices.visible = false
+	custom_action_input.release_focus()
 
 
 func _battle_origin() -> Vector2:
@@ -738,6 +977,21 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 		return
 	if payload.get("state") is Dictionary:
 		game_state = payload.get("state", {})
+	if request_mode == "world_area" and payload.get("area") is Dictionary:
+		_apply_area(payload.get("area", {}))
+		match str(payload.get("entry_direction", pending_exit_direction)):
+			"east":
+				player_tile = Vector2i(1, 21)
+			"west":
+				player_tile = Vector2i(WORLD_COLS - 2, 21)
+			"north":
+				player_tile = Vector2i(int(WORLD_COLS / 2), WORLD_ROWS - 2)
+			"south":
+				player_tile = Vector2i(int(WORLD_COLS / 2), 1)
+			_:
+				player_tile = Vector2i(int(WORLD_COLS / 2), 23)
+		player_visual = Vector2(player_tile)
+		pending_exit_direction = ""
 	var combat: Dictionary = _combat()
 	var was_battle: bool = mode == "battle" or request_mode in ["battle_start", "combat"]
 	if bool(combat.get("active", false)):
@@ -751,7 +1005,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	var narration: String = str(payload.get("narration", "")).strip_edges()
 	if narration.is_empty():
 		narration = "Action complete."
-	_set_message(narration)
+	_set_message(narration, payload.get("suggested_actions", []))
 	request_mode = ""
 	queue_redraw()
 
@@ -777,8 +1031,15 @@ func _update_header() -> void:
 		var campaign: Dictionary = game_state.get("campaign", {}) if game_state.get("campaign") is Dictionary else {}
 		var world_name: String = str(world.get("name", campaign.get("name", "THE SHATTERED REALMS")))
 		var location: String = str(game_state.get("current_location", "Frontier Outpost"))
-		title_label.text = world_name.to_upper()
-		subtitle_label.text = location
+		var biome: String = str(current_area.get("biome", "")).strip_edges()
+		title_label.text = str(current_area.get("name", location)).to_upper()
+		subtitle_label.text = world_name
+		if not biome.is_empty():
+			subtitle_label.text += "  •  " + biome.capitalize()
+		var links: Array = current_area.get("travel_links", []) if current_area.get("travel_links") is Array else []
+		if not links.is_empty() and links[0] is Dictionary:
+			var first_link: Dictionary = links[0]
+			subtitle_label.text += "  •  %s travel nearby (coming later)" % str(first_link.get("mode", "Transport")).capitalize()
 		hint_label.text = "MOVE  WASD / ARROWS     INTERACT  E / SPACE"
 
 
@@ -809,7 +1070,7 @@ func _refresh_abilities() -> void:
 	for child in ability_box.get_children():
 		child.queue_free()
 	var player: Dictionary = _player_combatant()
-	var abilities = player.get("abilities", [])
+	var abilities: Array = player.get("abilities", []) if player.get("abilities") is Array else []
 	if not abilities is Array or abilities.is_empty():
 		var empty_label := Label.new()
 		empty_label.text = "No equipped abilities"
@@ -826,16 +1087,39 @@ func _refresh_abilities() -> void:
 		ability_box.add_child(button)
 
 
-func _set_message(text: String, show_choices: bool = false) -> void:
+func _set_message(text: String, suggested_actions = []) -> void:
 	dialogue_panel.visible = true
-	dialogue_choices.visible = show_choices
 	dialogue_label.text = text
+	var actions: Array[String] = []
+	if suggested_actions is Array:
+		for item in suggested_actions:
+			var action_text: String = ""
+			if item is Dictionary:
+				action_text = str(item.get("text", "")).strip_edges()
+			else:
+				action_text = str(item).strip_edges()
+			if not action_text.is_empty():
+				actions.append(action_text)
+			if actions.size() == 3:
+				break
+	dialogue_choices.visible = not actions.is_empty()
+	if actions.is_empty():
+		return
+	var defaults: Array[String] = ["Look around carefully", "Ask a question", "Step away"]
+	while actions.size() < 3:
+		actions.append(defaults[actions.size()])
+	for index in range(suggestion_buttons.size()):
+		var button: Button = suggestion_buttons[index]
+		button.text = actions[index]
+		button.set_meta("action_text", actions[index])
+		button.visible = true
 
 
 func _set_buttons_disabled(disabled: bool) -> void:
-	for child in dialogue_choices.get_children():
-		if child is Button:
-			(child as Button).disabled = disabled
+	for button in suggestion_buttons:
+		button.disabled = disabled
+	custom_action_button.disabled = disabled
+	custom_action_input.editable = not disabled
 	for child in battle_actions.get_children():
 		if child is Button:
 			(child as Button).disabled = disabled
