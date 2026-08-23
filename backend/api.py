@@ -28,7 +28,7 @@ from backend.game.attributes import (
     normalize_attributes,
     validate_allocation,
 )
-from backend.game.abilities import resolve_ability
+from backend.game.abilities import prepare_ability_roll, resolve_ability
 from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, prepare_attack, resolve_attack
 from backend.game.dice import normalize_damage_expression
 from backend.game.economy import currency_profile, ensure_wallet, format_money
@@ -515,6 +515,18 @@ def _direct_combat_action(payload: Dict, action_type: str) -> Dict:
             if not ability_name:
                 raise ValueError("Choose an ability.")
             target = str(payload.get("target") or "").strip() or None
+            pending = prepare_ability_roll(combat, player_name, ability_name, target, enforce_turn=True)
+            if pending is not None:
+                pending["action"] = f"Use {ability_name}" + (f" on {target}" if target else "")
+                GAME_MASTER.state.data["pending_roll"] = deepcopy(pending)
+                events.append({
+                    "type": "player_ability_declared", "actor": player_name,
+                    "ability": ability_name, "target": target,
+                    "attack_attribute": pending.get("attack_attribute"), "turn_locked": True,
+                })
+                response = _combat_response(f"{ability_name} is aimed at {target}. Roll to see if it hits.", events, combat)
+                response.update({"requires_roll": True, "roll": deepcopy(pending), "pending_roll": deepcopy(pending)})
+                return response
             event = resolve_ability(combat, player_name, ability_name, target, enforce_turn=True)
             events.append({"type": "player_ability", **event})
             narration = f"{player_name} uses {ability_name}."
@@ -745,4 +757,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
