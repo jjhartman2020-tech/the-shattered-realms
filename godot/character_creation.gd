@@ -17,19 +17,19 @@ const STATS := [
 	"intelligence", "wisdom", "charisma", "speed", "defense", "luck", "magic"
 ]
 const STAT_EFFECTS := {
-	"health": "+5 max HP per SP",
-	"resource": "+5 max class Resource; regeneration scales too",
-	"strength": "Strength checks and physical/melee power",
-	"dexterity": "Aim, precision, ranged/finesse accuracy",
-	"agility": "Stealth, acrobatics, evasion and passive defense",
-	"constitution": "Endurance plus physical/status resistance",
-	"intelligence": "Investigation, engineering and knowledge",
-	"wisdom": "Perception, insight, survival and medicine",
-	"charisma": "Persuasion, deception, leadership and haggling",
-	"speed": "Movement and initiative",
-	"defense": "Strength of the Defend action",
-	"luck": "Critical chance and Luck checks",
-	"magic": "Spellcasting/channeling and Magic attacks"
+	"health": "1 SP = +5 Max HP. More HP lets you take more damage before going down.",
+	"resource": "1 SP = +5 Max Resource. Every 3 SP also gives +1 Resource recovery each combat round.",
+	"strength": "Each SP builds physical power. Every 3 SP = +1 Strength checks and melee accuracy; every 6 SP = +1 melee damage.",
+	"dexterity": "Each SP builds precision. Every 3 SP = +1 aiming, lockpicking, pickpocketing, ranged and finesse accuracy.",
+	"agility": "Each SP builds mobility. Every 3 SP = +1 stealth, dodging and acrobatics; every 9 SP = +1 passive Armor Class.",
+	"constitution": "Each SP builds toughness. Every 3 SP = +1 endurance checks; every 5 SP = +1% physical resistance; every 4 SP = +1% status resistance.",
+	"intelligence": "Each SP builds reasoning. Every 3 SP = +1 investigation, engineering, hacking and knowledge checks.",
+	"wisdom": "Each SP builds awareness. Every 3 SP = +1 perception, insight, survival and medicine checks.",
+	"charisma": "Each SP builds social ability. Every 3 SP = +1 persuasion, deception, intimidation, leadership and trading checks.",
+	"speed": "1 SP = +0.5 movement squares up to 30 SP, then +0.1. Every 3 SP = +1 initiative and Speed checks.",
+	"defense": "Each SP strengthens guarding. Every 3 SP = +1 Armor Class while using the Defend action.",
+	"luck": "Each SP builds toward fortunate outcomes. Every 3 SP = +1 Luck checks and +1% critical chance above the base 5%.",
+	"magic": "Each SP builds magical control. Every 3 SP = +1 spell, power and Magic attack accuracy."
 }
 
 var http: HTTPRequest
@@ -148,6 +148,7 @@ func _build_shell() -> void:
 	scroll_view = scroll
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = false
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(scroll)
 
@@ -268,6 +269,7 @@ func _show_identity() -> void:
 	name_input.placeholder_text = "Traveler"
 	name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_input.custom_minimum_size.y = 42
+	name_input.caret_blink = true
 	identity_grid.add_child(name_input)
 
 	content.add_child(_label("Appearance"))
@@ -276,6 +278,8 @@ func _show_identity() -> void:
 	appearance_input.placeholder_text = "Describe what your character looks like..."
 	appearance_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	appearance_input.custom_minimum_size = Vector2(0, 90)
+	appearance_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	appearance_input.scroll_fit_content_height = false
 	content.add_child(appearance_input)
 
 	content.add_child(HSeparator.new())
@@ -300,7 +304,10 @@ func _show_identity() -> void:
 	var sp_row := HBoxContainer.new()
 	sp_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(sp_row)
-	sp_row.add_child(_heading("CORE STATS"))
+	var core_stats_heading := _heading("CORE STATS")
+	core_stats_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
+	core_stats_heading.custom_minimum_size.x = 180
+	sp_row.add_child(core_stats_heading)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sp_row.add_child(spacer)
@@ -313,34 +320,51 @@ func _show_identity() -> void:
 	content.add_child(_muted("Most check bonuses gain about +1 for every 3 stat points early on. Natural stat cap is 100."))
 
 	stat_controls.clear()
-	var grid := GridContainer.new()
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 14)
-	grid.add_theme_constant_override("v_separation", 7)
-	content.add_child(grid)
-	grid.add_child(_muted("STAT"))
-	grid.add_child(_muted("SP"))
-	grid.add_child(_muted("WHAT IT DOES"))
+	var stat_list := VBoxContainer.new()
+	stat_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stat_list.add_theme_constant_override("separation", 8)
+	content.add_child(stat_list)
+
+	var stat_header := HBoxContainer.new()
+	stat_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stat_header.add_theme_constant_override("separation", 14)
+	stat_list.add_child(stat_header)
+	var stat_header_name := _muted("STAT")
+	stat_header_name.autowrap_mode = TextServer.AUTOWRAP_OFF
+	stat_header_name.custom_minimum_size.x = 150
+	stat_header.add_child(stat_header_name)
+	var stat_header_sp := _muted("SP")
+	stat_header_sp.autowrap_mode = TextServer.AUTOWRAP_OFF
+	stat_header_sp.custom_minimum_size.x = 110
+	stat_header.add_child(stat_header_sp)
+	var stat_header_effect := _muted("EXACT EFFECT")
+	stat_header_effect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stat_header.add_child(stat_header_effect)
+
 	for stat in STATS:
+		var stat_row := HBoxContainer.new()
+		stat_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		stat_row.add_theme_constant_override("separation", 14)
+		stat_list.add_child(stat_row)
 		var stat_name := _label(stat.capitalize())
 		stat_name.autowrap_mode = TextServer.AUTOWRAP_OFF
 		stat_name.custom_minimum_size.x = 150
-		grid.add_child(stat_name)
+		stat_row.add_child(stat_name)
 		var spin := SpinBox.new()
 		spin.min_value = 0
 		spin.max_value = 42
 		spin.step = 1
 		spin.allow_greater = false
-		spin.custom_minimum_size = Vector2(110, 38)
+		spin.custom_minimum_size = Vector2(110, 42)
 		spin.value = int(draft_stats.get(stat, 0))
 		spin.value_changed.connect(_on_stats_changed.bind(stat))
 		stat_controls[stat] = spin
-		grid.add_child(spin)
-		var effect := _muted(str(STAT_EFFECTS.get(stat, "Core character stat")))
+		stat_row.add_child(spin)
+		var effect := _muted(str(STAT_EFFECTS.get(stat, "Every 3 SP improves this stat's checks by +1.")))
 		effect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		effect.custom_minimum_size.x = 430
-		grid.add_child(effect)
+		effect.custom_minimum_size.y = 42
+		stat_row.add_child(effect)
+		stat_list.add_child(HSeparator.new())
 
 	derived_label = _muted("")
 	content.add_child(derived_label)
