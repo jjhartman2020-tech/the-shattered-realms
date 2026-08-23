@@ -8,9 +8,14 @@ from .memory import CampaignMemory
 from .provider import provider_from_environment
 from .rules import RuleLibrary
 from backend.game.abilities import resolve_ability
+from backend.game.armor import apply_armor_stat_bonuses, armor_stat_bonuses
 from backend.game.attributes import SKILL_ATTRIBUTE, attribute_check_bonus, build_combatant, normalize_attributes
-from backend.game.checks import resolve_check
-from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, resolve_attack, start_combat
+from backend.game.checks import DIFFICULTY_DCS, resolve_check
+from backend.game.combat import (
+    current_actor, defend_actor, end_turn, move_actor, prepare_attack,
+    prepare_damage_roll, resolve_attack, resolve_prepared_attack_roll,
+    resolve_prepared_damage_roll, start_combat,
+)
 from backend.game.resources import resource_key, resource_name_for_class
 from backend.game.state import GameState
 from backend.game.world import WorldSimulator
@@ -78,6 +83,16 @@ class GameMaster:
             return {"narration": "Tell the Game Master what you want to do.", "state": self.state.snapshot()}
 
         snapshot = self.state.snapshot()
+        existing_pending = snapshot.get("pending_roll")
+        if isinstance(existing_pending, dict) and existing_pending:
+            return {
+                "narration": "Finish the waiting dice roll before choosing another action.",
+                "suggested_actions": [],
+                "requires_roll": True,
+                "roll": deepcopy(existing_pending),
+                "pending_roll": deepcopy(existing_pending),
+                "state": snapshot,
+            }
         context = self.context_builder.build(player_action=action, game_state=snapshot, memories=self.memory.context_for(action), rules=self.rules.retrieve(action))
         active_combat = snapshot.get("combat")
         if isinstance(active_combat, dict) and active_combat.get("active"):
@@ -88,6 +103,7 @@ class GameMaster:
         result = self.provider.respond(context)
         mechanical_result = None
         combat_results: List[Dict] = []
+        pending_roll = None
         combat_request = result.get("combat_request")
 
         if isinstance(combat_request, dict):
@@ -112,16 +128,20 @@ class GameMaster:
                         if request_type in {"attack", "move_attack"}:
                             target = str(combat_request.get("target") or "").strip()
                             attack_attribute = str(combat_request.get("attack_attribute") or "strength").lower()
-                            if attack_attribute not in {"strength", "dexterity"}:
+                            if attack_attribute not in {"strength", "dexterity", "magic"}:
                                 attack_attribute = "strength"
-                            attack_result = resolve_attack(active_combat, player_name, target, attack_attribute=attack_attribute, enforce_turn=True)
-                            combat_results.append({"type": "player_attack", **attack_result})
-                            # New combat rule: making a basic attack immediately ends the attacker's turn.
-                            # Any movement must happen before the attack (move_attack handles that case).
-                            if active_combat.get("active"):
-                                combat_results.append({"type": "player_end_turn", "actor": player_name, "automatic": True, "reason": "Attacking ends your turn."})
-                                end_turn(active_combat)
-                                combat_results.extend(self._run_enemy_turns(active_combat))
+                            pending_roll = prepare_attack(
+                                active_combat, player_name, target,
+                                attack_attribute=attack_attribute, enforce_turn=True,
+                            )
+                            pending_roll["action"] = action
+                            combat_results.append({
+                                "type": "player_attack_declared",
+                                "attacker": player_name,
+                                "target": target,
+                                "turn_locked": True,
+                            })
+                            self.state.data["pending_roll"] = deepcopy(pending_roll)
                         elif request_type == "ability":
                             ability_name = str(combat_request.get("ability") or "").strip()
                             target = str(combat_request.get("target") or "").strip() or None
@@ -140,7 +160,7 @@ class GameMaster:
                         combat_results = [{"type": "invalid", "reason": str(exc)}]
                     self._persist_combat(active_combat)
 
-        if combat_results:
+        if combat_results and pending_roll is None:
             resolved_context = dict(context)
             resolved_context["active_combat"] = active_combat
             resolved_context["combat_result"] = combat_results
@@ -154,14 +174,54 @@ class GameMaster:
             narrated["combat_results"] = combat_results
             result = narrated
 
+        elif pending_roll is not None:
+            result = {
+                "narration": f"Attack declared against {pending_roll.get('target')}. Roll to see if it hits.",
+                "suggested_actions": [],
+                "combat_request": None,
+                "combat": active_combat,
+                "combat_results": combat_results,
+                "requires_roll": True,
+                "roll": deepcopy(pending_roll),
+                "pending_roll": deepcopy(pending_roll),
+                "state_changes": [],
+                "memories": [],
+                "world_notes": [],
+            }
+
         elif result.get("requires_roll"):
             request = result.get("roll") or {}
             if not isinstance(request, dict): request = {}
             reason = str(request.get("reason") or action).strip(); difficulty = str(request.get("difficulty") or "standard").strip().lower()
             if difficulty not in {"trivial", "easy", "standard", "hard", "very_hard", "extreme"}: difficulty = "standard"
-            skill = _skill_for_check(request, reason); player = self.state.snapshot().get("player", {}); skills = player.get("skills", {}) if isinstance(player, dict) else {}; raw_stats = player.get("stats") or player.get("attributes") or {} if isinstance(player, dict) else {}; attributes = normalize_attributes(raw_stats); skill_bonus = int(skills.get(skill, 0)) if skill else 0; attribute = _attribute_for_check(request, reason, skill); attribute_value = int(attributes.get(attribute, 0)) if attribute else 0; attribute_bonus = int(attribute_check_bonus(attribute_value)) if attribute else 0; modifier = skill_bonus + attribute_bonus
-            mechanical_result = resolve_check(reason=reason, difficulty=difficulty, modifier=modifier); mechanical_result.update({"skill": skill, "attribute": attribute, "attribute_value": attribute_value, "skill_bonus": skill_bonus, "attribute_bonus": attribute_bonus})
-            resolved_context = dict(context); resolved_context["mechanical_result"] = mechanical_result; resolved_context["mechanical_instruction"] = "The rules engine resolved this check using canonical 0-30 attributes. Obey it exactly and do not reroll."; result = self.provider.respond(resolved_context); result["requires_roll"] = False; result["roll"] = mechanical_result
+            skill = _skill_for_check(request, reason); player = self.state.snapshot().get("player", {}); skills = player.get("skills", {}) if isinstance(player, dict) else {}; raw_stats = player.get("stats") or player.get("attributes") or {} if isinstance(player, dict) else {}; equipped_armor = player.get("equipped_armor") if isinstance(player, dict) and isinstance(player.get("equipped_armor"), dict) else {}; attributes = normalize_attributes(apply_armor_stat_bonuses(raw_stats, equipped_armor)); skill_bonus = int(skills.get(skill, 0)) if skill else 0; attribute = _attribute_for_check(request, reason, skill); attribute_value = int(attributes.get(attribute, 0)) if attribute else 0; attribute_bonus = int(attribute_check_bonus(attribute_value)) if attribute else 0; modifier = skill_bonus + attribute_bonus
+            requested_dc = request.get("dc")
+            dc = int(requested_dc) if isinstance(requested_dc, (int, float)) else int(DIFFICULTY_DCS[difficulty])
+            armor_bonuses = armor_stat_bonuses(equipped_armor)
+            armor_amount = int(armor_bonuses.get(attribute, 0) or 0) if attribute else 0
+            pending_roll = {
+                "kind": "check", "stage": "check", "purpose": reason,
+                "expression": "1d20", "dc": dc, "difficulty": difficulty,
+                "modifier": modifier, "skill": skill, "attribute": attribute,
+                "attribute_value": attribute_value, "skill_bonus": skill_bonus,
+                "attribute_bonus": attribute_bonus, "action": action,
+                "modifier_breakdown": [
+                    {"source": f"{str(attribute or 'core stat').title()} {attribute_value}", "value": attribute_bonus},
+                    {"source": str(skill or "No trained skill").replace("_", " ").title(), "value": skill_bonus},
+                ],
+                "armor_bonus_note": (
+                    f"Armor grants +{armor_amount} {str(attribute).title()}, already included in the stat above."
+                    if armor_amount else ""
+                ),
+            }
+            self.state.data["pending_roll"] = deepcopy(pending_roll)
+            self.state.save()
+            result = {
+                "narration": f"A {reason} check is required. Roll against DC {dc}.",
+                "suggested_actions": [], "requires_roll": True,
+                "roll": deepcopy(pending_roll), "pending_roll": deepcopy(pending_roll),
+                "state_changes": [], "memories": [], "world_notes": [],
+            }
 
         self.state.apply_changes(result.get("state_changes", []))
         for memory in result.get("memories", []): self._store_memory(memory, "event")
@@ -173,6 +233,135 @@ class GameMaster:
             if combat_results: turn_record += f"\nCombat results: {combat_results}"
             self.memory.remember(turn_record, category="turn", importance=1, confirmed=True)
         result["state"] = self.state.snapshot(); result["memory_count"] = len(self.memory.all()); return result
+
+    def resolve_pending_roll(self) -> Dict:
+        """Resolve exactly one player-requested roll and pause again if damage is next."""
+        pending = self.state.data.get("pending_roll")
+        if not isinstance(pending, dict) or not pending:
+            return {"narration": "No dice roll is waiting.", "suggested_actions": [], "state": self.state.snapshot()}
+
+        kind = str(pending.get("kind") or "")
+        action = str(pending.get("action") or pending.get("purpose") or "Resolve the roll")
+        if kind == "check":
+            mechanical_result = resolve_check(
+                reason=str(pending.get("purpose") or action),
+                difficulty=str(pending.get("difficulty") or "standard"),
+                dc=int(pending.get("dc", 12) or 12),
+                modifier=int(pending.get("modifier", 0) or 0),
+                expression=str(pending.get("expression") or "1d20"),
+            )
+            mechanical_result.update({
+                "skill": pending.get("skill"), "attribute": pending.get("attribute"),
+                "attribute_value": int(pending.get("attribute_value", 0) or 0),
+                "skill_bonus": int(pending.get("skill_bonus", 0) or 0),
+                "attribute_bonus": int(pending.get("attribute_bonus", 0) or 0),
+            })
+            self.state.data.pop("pending_roll", None)
+            snapshot = self.state.snapshot()
+            context = self.context_builder.build(player_action=action, game_state=snapshot, memories=self.memory.context_for(action), rules=self.rules.retrieve(action))
+            context["mechanical_result"] = mechanical_result
+            context["mechanical_instruction"] = "The player pressed Roll Dice. Narrate this exact result and do not reroll or change its DC or modifiers."
+            result = self.provider.respond(context)
+            check_summary = (
+                f"ROLL RESULT: {mechanical_result.get('base_total')} "
+                f"{int(mechanical_result.get('modifier', 0)):+d} = {mechanical_result.get('total')} "
+                f"vs DC {mechanical_result.get('dc')} — {str(mechanical_result.get('outcome')).replace('_', ' ').upper()}."
+            )
+            narrated_text = str(result.get("narration", "")).strip()
+            result["narration"] = check_summary + (("\n\n" + narrated_text) if narrated_text else "")
+            result["requires_roll"] = False
+            result["roll"] = mechanical_result
+            result["pending_roll"] = {}
+            self.state.apply_changes(result.get("state_changes", []))
+            for memory in result.get("memories", []): self._store_memory(memory, "event")
+            for note in result.get("world_notes", []): self._store_memory(note, "world")
+            narration = str(result.get("narration", "")).strip()
+            if narration:
+                self.memory.remember(f"Player action: {action}\nMechanical check: {mechanical_result}\nGame Master result: {narration}", category="turn", importance=1, confirmed=True)
+            self.state.save()
+            result["state"] = self.state.snapshot()
+            result["memory_count"] = len(self.memory.all())
+            return result
+
+        combat = self.state.data.get("combat")
+        if not isinstance(combat, dict) or not combat.get("active"):
+            self.state.data.pop("pending_roll", None)
+            self.state.save()
+            return {"narration": "The battle ended before that roll could be made.", "suggested_actions": [], "pending_roll": {}, "state": self.state.snapshot()}
+
+        events: List[Dict] = []
+        if kind == "attack":
+            attack_result = resolve_prepared_attack_roll(combat, pending)
+            events.append({"type": "player_attack_roll", **attack_result})
+            if attack_result.get("hit"):
+                damage_pending = prepare_damage_roll(combat, pending, attack_result)
+                damage_pending["action"] = action
+                self.state.data["pending_roll"] = deepcopy(damage_pending)
+                self._persist_combat(combat)
+                return {
+                    "narration": f"Roll {attack_result.get('d20')} + {attack_result.get('attack_bonus')} = {attack_result.get('attack_total')}: hit. Now roll damage.",
+                    "suggested_actions": [], "combat": deepcopy(combat),
+                    "combat_results": events, "requires_roll": True,
+                    "roll": deepcopy(damage_pending), "pending_roll": deepcopy(damage_pending),
+                    "state": self.state.snapshot(),
+                }
+        elif kind == "damage":
+            attack_result = resolve_prepared_damage_roll(combat, pending)
+            events.append({"type": "player_damage_roll", **attack_result})
+        else:
+            raise ValueError("Unknown pending roll type.")
+
+        self.state.data.pop("pending_roll", None)
+        player = self.state.data.get("player", {})
+        player_name = str(player.get("name") or pending.get("attacker") or "Traveler")
+        if combat.get("active"):
+            events.append({"type": "player_end_turn", "actor": player_name, "automatic": True, "reason": "Attacking ends your turn and movement."})
+            end_turn(combat)
+            events.extend(self._run_enemy_turns(combat))
+        self._persist_combat(combat)
+
+        snapshot = self.state.snapshot()
+        context = self.context_builder.build(player_action=action, game_state=snapshot, memories=self.memory.context_for(action), rules=self.rules.retrieve(action))
+        context["active_combat"] = combat
+        context["combat_result"] = events
+        context["mechanical_instruction"] = "The player pressed the visible dice button. Narrate the exact attack/damage results. The attack ended the player's turn and all movement; do not reroll or move the player afterward."
+        result = self.provider.respond(context)
+        if kind == "damage":
+            damage_rolls = attack_result.get("damage_rolls", []) if isinstance(attack_result.get("damage_rolls"), list) else []
+            die_values = [str(item.get("total")) for item in damage_rolls if isinstance(item, dict)]
+            mechanical_summary = (
+                f"DAMAGE RESULT: {' + '.join(die_values) if die_values else '0'} "
+                f"{int(attack_result.get('damage_bonus', 0)) + int(attack_result.get('accuracy_margin_damage_bonus', 0)):+d} "
+                f"= {attack_result.get('raw_damage', 0)} raw; {attack_result.get('damage', 0)} damage after resistance. Turn ended."
+            )
+            shield_absorbed = int(attack_result.get("shield_absorbed", 0) or 0)
+            armor_absorbed = int(attack_result.get("armor_absorbed", 0) or 0)
+            hp_damage = int(attack_result.get("hp_damage", attack_result.get("damage", 0)) or 0)
+            if shield_absorbed or armor_absorbed:
+                mechanical_summary += f" Shield absorbed {shield_absorbed}; armor absorbed {armor_absorbed}; HP lost {hp_damage}."
+        else:
+            mechanical_summary = (
+                f"ATTACK RESULT: {attack_result.get('d20')} {int(attack_result.get('attack_bonus', 0)):+d} "
+                f"= {attack_result.get('attack_total')} vs DC {attack_result.get('armor_class')} — MISS. Turn ended."
+            )
+        narrated_text = str(result.get("narration", "")).strip()
+        result["narration"] = mechanical_summary + (("\n\n" + narrated_text) if narrated_text else "")
+        result["combat_request"] = None
+        result["combat"] = deepcopy(combat)
+        result["combat_results"] = events
+        result["requires_roll"] = False
+        result["roll"] = attack_result
+        result["pending_roll"] = {}
+        self.state.apply_changes(result.get("state_changes", []))
+        for memory in result.get("memories", []): self._store_memory(memory, "event")
+        for note in result.get("world_notes", []): self._store_memory(note, "world")
+        narration = str(result.get("narration", "")).strip()
+        if narration:
+            self.memory.remember(f"Player action: {action}\nCombat results: {events}\nGame Master result: {narration}", category="turn", importance=1, confirmed=True)
+        self.state.save()
+        result["state"] = self.state.snapshot()
+        result["memory_count"] = len(self.memory.all())
+        return result
 
     def _fresh_template_actor(self, raw_actor: Dict) -> Dict:
         actor = deepcopy(raw_actor); max_hp = max(0, int(actor.get("max_hp", actor.get("hp", 0)) or 0)); max_resource = max(0, int(actor.get("max_resource", actor.get("max_mana", 0)) or 0)); actor["hp"] = max_hp; actor["max_hp"] = max_hp; actor["resource"] = max_resource; actor["max_resource"] = max_resource; actor["mana"] = max_resource; actor["max_mana"] = max_resource; actor["movement_used"] = 0; actor["primary_action_used"] = False; actor["defending"] = False; actor["active_defense_ac_bonus"] = 0; actor.pop("ability_cooldowns", None); actor["defeated"] = False; return actor
