@@ -197,6 +197,12 @@ class GameState:
             if kind == "add_inventory_item":
                 self._add_inventory_item(self.data.setdefault("player", {}), change.get("item") if isinstance(change.get("item"), dict) else {})
                 continue
+            if kind in {"add_currency", "add_money"}:
+                player = self.data.setdefault("player", {})
+                wallet = player.get("wallet") if isinstance(player.get("wallet"), dict) else {"amount": 0}
+                player["wallet"] = wallet
+                wallet["amount"] = max(0, int(wallet.get("amount", 0) or 0) + max(0, int(change.get("amount", 0) or 0)))
+                continue
             if kind == "mark_loot_source":
                 source_id = str(change.get("source_id") or "").strip().lower().replace(" ", "_")
                 if source_id:
