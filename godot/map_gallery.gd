@@ -44,7 +44,7 @@ func open_with_state(state: Dictionary) -> void:
 	var gallery = state.get("map_gallery")
 	if gallery is Dictionary:
 		maps = gallery.get("maps", []) if gallery.get("maps", []) is Array else []
-		selected_map_id = str(gallery.get("selected_map_id") or "")
+		selected_map_id = _string_or_default(gallery.get("selected_map_id"), "")
 	_rebuild_map_list()
 	_set_status("Loading your saved maps...", false)
 	api_request.emit("/maps/list", {}, "map_list")
@@ -62,7 +62,7 @@ func apply_payload(payload: Dictionary, mode: String) -> void:
 	if mode == "map_list":
 		maps = payload.get("maps", []) if payload.get("maps", []) is Array else []
 		current_location = str(payload.get("current_location", current_location))
-		var saved_id := str(payload.get("selected_map_id") or selected_map_id)
+		var saved_id := _string_or_default(payload.get("selected_map_id"), selected_map_id)
 		_rebuild_map_list()
 		if maps.is_empty():
 			_show_empty_preview()
@@ -77,27 +77,40 @@ func apply_payload(payload: Dictionary, mode: String) -> void:
 		if not record is Dictionary:
 			_set_status("The backend returned an invalid map.", true)
 			return
-		selected_map_id = str(record.get("id") or "")
+		selected_map_id = _string_or_default(record.get("id"), "")
 		_show_record(record)
-		var encoded := str(payload.get("map_base64") or "")
+		var encoded := _string_or_default(payload.get("map_base64"), "")
 		if encoded.is_empty():
 			map_image.texture = null
 			_set_status("This map image could not be loaded.", true)
 			return
-		var raw := Marshalls.base64_to_raw(encoded)
-		var image := Image.new()
-		var load_error := image.load_png_from_buffer(raw)
-		if load_error != OK:
-			load_error = image.load_jpg_from_buffer(raw)
-		if load_error != OK:
-			load_error = image.load_webp_from_buffer(raw)
-		if load_error != OK:
+		var image: Image = _image_from_base64(encoded)
+		if image == null:
 			map_image.texture = null
 			_set_status("This map image could not be read.", true)
 			return
 		map_image.texture = ImageTexture.create_from_image(image)
 		_set_status("Map ready. New places will be added as you discover them.", false)
 		_rebuild_map_list()
+
+
+func _string_or_default(value, fallback: String) -> String:
+	return fallback if value == null else str(value)
+
+
+func _image_from_base64(encoded: String) -> Image:
+	var raw := Marshalls.base64_to_raw(encoded)
+	if raw.size() < 4:
+		return null
+	var image := Image.new()
+	var load_error := ERR_FILE_UNRECOGNIZED
+	if raw.size() >= 8 and raw[0] == 0x89 and raw[1] == 0x50 and raw[2] == 0x4e and raw[3] == 0x47:
+		load_error = image.load_png_from_buffer(raw)
+	elif raw[0] == 0xff and raw[1] == 0xd8 and raw[2] == 0xff:
+		load_error = image.load_jpg_from_buffer(raw)
+	elif raw.size() >= 12 and raw[0] == 0x52 and raw[1] == 0x49 and raw[2] == 0x46 and raw[3] == 0x46 and raw[8] == 0x57 and raw[9] == 0x45 and raw[10] == 0x42 and raw[11] == 0x50:
+		load_error = image.load_webp_from_buffer(raw)
+	return image if load_error == OK else null
 
 
 func _build_ui() -> void:
