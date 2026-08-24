@@ -1,5 +1,7 @@
 extends Control
 
+const MapViewer = preload("res://map_viewer.gd")
+
 const API_BASE := "http://127.0.0.1:8765"
 const BG := Color("080c13")
 const PANEL := Color("151b26")
@@ -72,6 +74,7 @@ var selected_equipment_indexes: Array = []
 var selected_kit_index := 0
 var armor_options: Array = []
 var selected_armor_index := -1
+var map_viewer
 
 
 func _ready() -> void:
@@ -83,9 +86,13 @@ func _ready() -> void:
 	http = HTTPRequest.new()
 	http.request_completed.connect(_on_request_completed)
 	add_child(http)
+	map_viewer = MapViewer.new()
+	add_child(map_viewer)
 
 
 func begin_new_game(_state: Dictionary = {}) -> void:
+	if is_instance_valid(map_viewer):
+		map_viewer.close()
 	draft_world = {}
 	draft_maps = []
 	draft_world_map_base64 = ""
@@ -239,7 +246,11 @@ func _show_world_review() -> void:
 		map_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		map_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		map_preview.texture = _texture_from_base64(draft_world_map_base64)
+		map_preview.tooltip_text = "Click to view this map full screen"
+		map_preview.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		map_preview.gui_input.connect(_on_world_map_preview_input.bind(map_preview))
 		content.add_child(map_preview)
+		content.add_child(_muted("Click the map to open it full screen. Use the mouse wheel to zoom."))
 	else:
 		content.add_child(_muted("The map preview is not available, but the map will still be saved in your Map Gallery."))
 	if draft_maps.size() > 1:
@@ -258,6 +269,15 @@ func _show_world_review() -> void:
 	confirm.custom_minimum_size.y = 48
 	confirm.pressed.connect(_confirm_world)
 	row.add_child(confirm)
+
+
+func _on_world_map_preview_input(event: InputEvent, preview: TextureRect) -> void:
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event := event as InputEventMouseButton
+	if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and preview.texture != null:
+		map_viewer.open_map(preview.texture, "%s WORLD MAP" % str(draft_world.get("name", "YOUR WORLD")).to_upper())
+		preview.accept_event()
 
 
 func _confirm_world() -> void:
