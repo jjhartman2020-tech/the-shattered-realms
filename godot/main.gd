@@ -1,6 +1,7 @@
 extends Control
 
 const CharacterHubView = preload("res://character_hub.gd")
+const MapGalleryView = preload("res://map_gallery.gd")
 
 const API_BASE := "http://127.0.0.1:8765"
 const BG := Color("0b0f17")
@@ -48,6 +49,7 @@ var send_button: Button
 var context_title: Label
 var context_text: RichTextLabel
 var character_hub
+var map_gallery
 
 
 func _ready() -> void:
@@ -131,6 +133,8 @@ func _build_ui() -> void:
 		button.custom_minimum_size = Vector2(150, 42)
 		if entry[1] == "player":
 			button.pressed.connect(_open_character_hub)
+		elif entry[1] == "map":
+			button.pressed.connect(_open_map_gallery)
 		else:
 			button.pressed.connect(_show_context.bind(entry[1]))
 		nav.add_child(button)
@@ -139,6 +143,11 @@ func _build_ui() -> void:
 	character_hub.visible = false
 	character_hub.api_request.connect(_character_hub_request)
 	add_child(character_hub)
+
+	map_gallery = MapGalleryView.new()
+	map_gallery.visible = false
+	map_gallery.api_request.connect(_map_gallery_request)
+	add_child(map_gallery)
 
 
 func _build_player_panel() -> PanelContainer:
@@ -394,6 +403,12 @@ func _open_character_hub() -> void:
 	character_hub.open_with_state(latest_state)
 
 
+func _open_map_gallery() -> void:
+	if not is_instance_valid(map_gallery):
+		return
+	map_gallery.open_with_state(latest_state)
+
+
 func _character_hub_request(endpoint: String, payload: Dictionary, mode: String) -> void:
 	if busy:
 		character_hub.set_status("Wait for the current request to finish.", true)
@@ -408,6 +423,22 @@ func _character_hub_request(endpoint: String, payload: Dictionary, mode: String)
 	if err != OK:
 		busy = false
 		character_hub.set_status("Could not reach the Character Hub backend.", true)
+
+
+func _map_gallery_request(endpoint: String, payload: Dictionary, mode: String) -> void:
+	if busy:
+		map_gallery.set_status("Wait for the current request to finish.", true)
+		return
+	busy = true
+	request_mode = mode
+	connection_label.text = "Loading map..."
+	connection_label.add_theme_color_override("font_color", MUTED)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var body := JSON.stringify(payload)
+	var err := http.request(API_BASE + endpoint, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		busy = false
+		map_gallery.set_status("Could not reach the Map Gallery backend.", true)
 
 
 func _send_action(action: String) -> void:
@@ -465,6 +496,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			roll_button.disabled = false
 		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
 			character_hub.set_status("Backend unavailable — restart python -m backend.api", true)
+		elif request_mode.begins_with("map_") and is_instance_valid(map_gallery):
+			map_gallery.set_status("Backend unavailable — restart python -m backend.api", true)
 		else:
 			_set_connection_error("Backend unavailable — run: python -m backend.api")
 		return
@@ -480,6 +513,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			error_message = str(error_parsed.get("error", error_message))
 		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
 			character_hub.set_status(error_message, true)
+		elif request_mode.begins_with("map_") and is_instance_valid(map_gallery):
+			map_gallery.set_status(error_message, true)
 		else:
 			_set_connection_error(error_message)
 		return
@@ -490,6 +525,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_set_inputs_enabled(pending_roll.is_empty())
 		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
 			character_hub.set_status("Backend returned invalid character data.", true)
+		elif request_mode.begins_with("map_") and is_instance_valid(map_gallery):
+			map_gallery.set_status("Backend returned invalid map data.", true)
 		else:
 			_set_connection_error("Backend returned invalid data")
 		return
@@ -502,6 +539,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			roll_button.disabled = false
 		if request_mode.begins_with("character_") and is_instance_valid(character_hub):
 			character_hub.set_status(str(payload.get("error", "Unknown Character Hub error")), true)
+		elif request_mode.begins_with("map_") and is_instance_valid(map_gallery):
+			map_gallery.set_status(str(payload.get("error", "Unknown Map Gallery error")), true)
 		else:
 			_set_connection_error(str(payload.get("error", "Unknown backend error")))
 		return
@@ -513,6 +552,16 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_update_player_panel()
 		if is_instance_valid(character_hub):
 			character_hub.apply_payload(payload)
+		return
+	if request_mode.begins_with("map_"):
+		var completed_mode := request_mode
+		busy = false
+		latest_state = payload.get("state", {}) if payload.get("state", {}) is Dictionary else latest_state
+		connection_label.text = "● BACKEND CONNECTED"
+		connection_label.add_theme_color_override("font_color", SUCCESS)
+		_update_player_panel()
+		if is_instance_valid(map_gallery):
+			map_gallery.apply_payload(payload, completed_mode)
 		return
 	if request_mode == "roll":
 		var final_roll: int = _extract_authoritative_roll(payload)
@@ -530,6 +579,11 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	var narration := str(payload.get("narration", "")).strip_edges()
 	if not narration.is_empty():
 		story_history.append("GM: " + narration)
+	var discovered_maps = payload.get("new_maps", [])
+	if discovered_maps is Array:
+		for discovered in discovered_maps:
+			if discovered is Dictionary:
+				story_history.append("MAP DISCOVERED: %s — open MAP to view it." % str(discovered.get("title", "New Map")))
 	_refresh_story()
 	_set_suggestions(payload.get("suggested_actions", []))
 	_show_context("player")
@@ -740,7 +794,7 @@ func _show_context(kind: String) -> void:
 			context_text.text = _inventory_text(player)
 		"map":
 			context_title.text = "MAP / LOCATION"
-			context_text.text = "Current location:\n%s\n\nVisual map support is coming in the next UI passes." % str(player.get("location", "Unknown"))
+			context_text.text = "Current location:\n%s\n\nUse the MAP button to open your searchable Universe, World, and Town map collection." % str(player.get("location", "Unknown"))
 		"party":
 			context_title.text = "PARTY"
 			context_text.text = _party_text()
