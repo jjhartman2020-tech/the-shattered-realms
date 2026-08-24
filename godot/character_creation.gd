@@ -817,6 +817,8 @@ func _texture_from_base64(encoded: String):
 	if error != OK:
 		error = image.load_jpg_from_buffer(raw)
 	if error != OK:
+		error = image.load_webp_from_buffer(raw)
+	if error != OK:
 		return null
 	return ImageTexture.create_from_image(image)
 
