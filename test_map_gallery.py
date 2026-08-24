@@ -4,6 +4,8 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from backend.game.map_gallery import (
+    MAP_RENDER_VERSION,
+    _map_prompt,
     _is_valid_png,
     find_map,
     generate_map_image,
@@ -98,6 +100,38 @@ class MapGalleryTests(unittest.TestCase):
 
             self.assertEqual(load_map_base64(record, output_dir), "")
             self.assertEqual(record["image_status"], "pending")
+
+    def test_new_map_prompt_requires_real_cartography_and_readable_labels(self):
+        prompt = _map_prompt({
+            "name": "Star Reach",
+            "genre": "space opera",
+            "important_locations": ["Nova Prime — capital world", "Orion Gate: trade station"],
+        }, {
+            "map_type": "universe",
+            "location": "Star Reach",
+            "description": "Known public systems.",
+        })
+        self.assertIn("actual map used for navigation", prompt)
+        self.assertIn("Strict 90-degree top-down", prompt)
+        self.assertIn('"NOVA PRIME"', prompt)
+        self.assertIn("LARGE BOLD UPPERCASE", prompt)
+        self.assertIn("No cursive", prompt)
+
+    def test_old_render_version_is_regenerated_once(self):
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            record = initial_map_records({"name": "Green Vale", "genre": "fantasy"})[0]
+            image_path = output_dir / record["image_file"]
+            old_bytes = generate_map_image(NoImageProvider(), {"name": "Green Vale"}, record, output_dir)
+            self.assertEqual(old_bytes["image_render_version"], MAP_RENDER_VERSION)
+            record["image_render_version"] = MAP_RENDER_VERSION - 1
+            record["image_status"] = "ready"
+
+            self.assertEqual(load_map_base64(record, output_dir), "")
+            self.assertEqual(record["image_status"], "pending")
+            generate_map_image(NoImageProvider(), {"name": "Green Vale"}, record, output_dir)
+            self.assertEqual(record["image_render_version"], MAP_RENDER_VERSION)
+            self.assertTrue(load_map_base64(record, output_dir))
 
     def test_map_titles_gain_map_suffix(self):
         state = {"turn": 7}
