@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from backend.game.map_gallery import (
+    _is_valid_png,
     find_map,
     generate_map_image,
     initial_map_records,
@@ -70,7 +71,33 @@ class MapGalleryTests(unittest.TestCase):
             encoded = load_map_base64(record, output_dir)
             self.assertTrue(encoded)
             self.assertTrue(base64.b64decode(encoded).startswith(b"\x89PNG"))
+            self.assertTrue(_is_valid_png(base64.b64decode(encoded)))
             self.assertEqual(record["image_status"], "ready")
+
+    def test_corrupt_cached_map_is_replaced_automatically(self):
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            record = initial_map_records({"name": "Green Vale", "genre": "fantasy"})[0]
+            image_path = output_dir / record["image_file"]
+            image_path.write_bytes(b"not really a png")
+            record["image_status"] = "ready"
+
+            generate_map_image(NoImageProvider(), {"name": "Green Vale"}, record, output_dir)
+
+            repaired = image_path.read_bytes()
+            self.assertTrue(_is_valid_png(repaired))
+            self.assertEqual(record["image_status"], "ready")
+            self.assertEqual(record["image_source"], "fallback")
+
+    def test_truncated_png_is_not_returned_to_godot(self):
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            record = initial_map_records({"name": "Green Vale", "genre": "fantasy"})[0]
+            image_path = output_dir / record["image_file"]
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"broken")
+
+            self.assertEqual(load_map_base64(record, output_dir), "")
+            self.assertEqual(record["image_status"], "pending")
 
     def test_map_titles_gain_map_suffix(self):
         state = {"turn": 7}
