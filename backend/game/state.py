@@ -51,6 +51,7 @@ DEFAULT_STATE = {
         "conditions": [], "location": "unknown",
     },
     "party": [], "npcs": {}, "factions": {}, "locations": {}, "quests": {}, "world_flags": {"loot_sources": {}},
+    "map_gallery": {"maps": [], "selected_map_id": None},
     "combat": {"active": False}, "encounter_template": {}, "encounter_reset_pending": False,
     "pending_encounter_enemies": [], "turn": 0,
 }
@@ -116,6 +117,10 @@ class GameState:
                 item["rarity"] = rarity if rarity in RARITIES else "common"
         world_flags = self.data.setdefault("world_flags", {})
         if not isinstance(world_flags.get("loot_sources"), dict): world_flags["loot_sources"] = {}
+        gallery = self.data.setdefault("map_gallery", {"maps": [], "selected_map_id": None})
+        if not isinstance(gallery, dict):
+            gallery = {"maps": [], "selected_map_id": None}; self.data["map_gallery"] = gallery
+        if not isinstance(gallery.get("maps"), list): gallery["maps"] = []
         if not completed:
             for key in ("unlocked_abilities", "equipped_abilities"):
                 items = player.get(key)
@@ -217,6 +222,10 @@ class GameState:
                 location = str(change.get("location") or change.get("value") or "").strip()
                 if location:
                     self.data.setdefault("player", {})["location"] = location
+                continue
+            if kind == "discover_map":
+                from .map_gallery import register_map
+                register_map(self.data, change)
                 continue
             if kind == "set_encounter_enemies":
                 enemies = change.get("enemies")
