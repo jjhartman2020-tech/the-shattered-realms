@@ -2,6 +2,8 @@ extends Control
 
 signal api_request(endpoint: String, payload: Dictionary, mode: String)
 
+const MapViewer = preload("res://map_viewer.gd")
+
 const BG := Color("080c13")
 const PANEL := Color("151b26")
 const PANEL_ALT := Color("101621")
@@ -27,6 +29,7 @@ var map_image: TextureRect
 var map_description: Label
 var status_label: Label
 var filter_buttons: Dictionary = {}
+var full_screen_viewer
 
 
 func _ready() -> void:
@@ -35,9 +38,13 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	visible = false
 	_build_ui()
+	full_screen_viewer = MapViewer.new()
+	add_child(full_screen_viewer)
 
 
 func open_with_state(state: Dictionary) -> void:
+	if is_instance_valid(full_screen_viewer):
+		full_screen_viewer.close()
 	visible = true
 	move_to_front()
 	current_location = str(state.get("player", {}).get("location", "Unknown")) if state.get("player", {}) is Dictionary else "Unknown"
@@ -51,6 +58,8 @@ func open_with_state(state: Dictionary) -> void:
 
 
 func close() -> void:
+	if is_instance_valid(full_screen_viewer):
+		full_screen_viewer.close()
 	visible = false
 
 
@@ -228,13 +237,26 @@ func _build_ui() -> void:
 	map_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	map_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	map_image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	map_image.tooltip_text = "Click to view this map full screen"
+	map_image.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	map_image.gui_input.connect(_on_map_preview_input)
 	preview_root.add_child(map_image)
+	preview_root.add_child(_muted("Click the map to open it full screen. Use the mouse wheel to zoom."))
 	map_description = _label("Your maps will appear here as the adventure reveals them.")
 	map_description.add_theme_color_override("font_color", MUTED)
 	preview_root.add_child(map_description)
 
 	status_label = _muted("")
 	root.add_child(status_label)
+
+
+func _on_map_preview_input(event: InputEvent) -> void:
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event := event as InputEventMouseButton
+	if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and map_image.texture != null:
+		full_screen_viewer.open_map(map_image.texture, map_title.text)
+		map_image.accept_event()
 
 
 func _set_filter(filter_name: String) -> void:
