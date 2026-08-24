@@ -43,6 +43,18 @@ from backend.game.character_hub import (
 from backend.game.combat import current_actor, defend_actor, end_turn, move_actor, prepare_attack, resolve_attack
 from backend.game.dice import normalize_damage_expression
 from backend.game.economy import currency_profile, ensure_wallet, format_money
+from backend.game.map_gallery import (
+    clear_map_cache,
+    find_map,
+    generate_map_image,
+    generate_pending_maps,
+    install_initial_maps,
+    initial_map_records,
+    list_maps,
+    load_map_base64,
+    prepare_initial_maps,
+    register_map,
+)
 from backend.game.progression import xp_required_for_next_level
 from backend.game.resources import resource_key
 from backend.game.world_character_generation import install_world_aware_character_generation
@@ -60,16 +72,18 @@ LOCK = threading.RLock()
 # stored in GameState; only generated previews/selections live here temporarily.
 CREATION_SESSION: Dict[str, Any] = {
     "world": None,
+    "maps": [],
     "identity": None,
     "package": None,
     "armor_options": [],
 }
 CHARACTER_HUB_SESSION: Dict[str, Any] = {"ability_choices": []}
 PORTRAIT_PATH = Path(os.getenv("SHATTERED_REALMS_PORTRAIT_FILE", "data/character_portrait.png"))
+MAPS_DIR = Path(os.getenv("SHATTERED_REALMS_MAP_DIR", "data/maps"))
 
 
 def _clear_creation_session() -> None:
-    CREATION_SESSION.update({"world": None, "identity": None, "package": None, "armor_options": []})
+    CREATION_SESSION.update({"world": None, "maps": [], "identity": None, "package": None, "armor_options": []})
 
 
 def _clear_character_hub_session() -> None:
@@ -143,6 +157,7 @@ def _new_game_payload() -> Dict:
     GAME_MASTER.memory.clear()
     _clear_creation_session()
     _clear_character_hub_session()
+    clear_map_cache(MAPS_DIR)
     state = GAME_MASTER.state.snapshot()
     return {
         "ok": True,
@@ -161,8 +176,15 @@ def _generate_world_payload(payload: Dict) -> Dict:
     if not prompt:
         return {"ok": False, "error": "Describe the world and adventure you want first."}
     world = generate_world(GAME_MASTER.provider, prompt)
+    maps, world_map_base64 = prepare_initial_maps(GAME_MASTER.provider, world, MAPS_DIR)
     CREATION_SESSION["world"] = deepcopy(world)
-    return {"ok": True, "world": world}
+    CREATION_SESSION["maps"] = deepcopy(maps)
+    return {
+        "ok": True,
+        "world": world,
+        "maps": deepcopy(maps),
+        "world_map_base64": world_map_base64,
+    }
 
 
 def _confirm_world_payload() -> Dict:
@@ -175,6 +197,7 @@ def _confirm_world_payload() -> Dict:
     campaign = GAME_MASTER.state.data.setdefault("campaign", {})
     campaign["name"] = str(world.get("name") or "Untitled Campaign")
     campaign["genre"] = str(world.get("genre") or "custom")
+    install_initial_maps(GAME_MASTER.state.data, CREATION_SESSION.get("maps", []))
     GAME_MASTER.state.save()
     install_world_aware_character_generation(GAME_MASTER, world)
     return {"ok": True, "state": GAME_MASTER.state.snapshot(), "world": deepcopy(world)}
@@ -390,6 +413,7 @@ def _finalize_character_payload(payload: Dict) -> Dict:
     })
     GAME_MASTER.state.save()
 
+    before_maps = _known_map_ids()
     opening = GAME_MASTER.provider.respond({
         "player_action": "Begin the adventure with an opening scene for this newly completed character.",
         "game_state": GAME_MASTER.state.snapshot(),
@@ -397,6 +421,7 @@ def _finalize_character_payload(payload: Dict) -> Dict:
         "relevant_rules": [],
     })
     GAME_MASTER.state.apply_changes(opening.get("state_changes", []))
+    new_maps = _generate_newly_discovered_maps(before_maps)
     for memory in opening.get("memories", []):
         GAME_MASTER._store_memory(memory, "event")
     for note in opening.get("world_notes", []):
@@ -414,6 +439,7 @@ def _finalize_character_payload(payload: Dict) -> Dict:
         "player": deepcopy(player),
         "starting_money": format_money(starting_money, money_profile),
         "character_creation_complete": True,
+        "new_maps": new_maps,
     }
 
 
@@ -641,7 +667,18 @@ def _world_area_payload(payload: Dict) -> Dict:
     exploration["current_y"] = target_y
     exploration["current_area"] = deepcopy(area)
     exploration["last_entry_direction"] = direction
-    GAME_MASTER.state.data["current_location"] = str(area.get("name") or "Unknown Area")
+    area_name = str(area.get("name") or "Unknown Area")
+    GAME_MASTER.state.data["current_location"] = area_name
+    GAME_MASTER.state.data.setdefault("player", {})["location"] = area_name
+    discovered = register_map(GAME_MASTER.state.data, {
+        "map_type": "town",
+        "title": f"{area_name} Map",
+        "location": area_name,
+        "description": str(area.get("arrival_text") or area.get("biome") or "A newly explored local area."),
+        "source": "exploration",
+    })
+    if str(discovered.get("image_status")) != "ready":
+        generate_pending_maps(GAME_MASTER, MAPS_DIR, limit=1, only_ids=[str(discovered.get("id") or "")])
     GAME_MASTER.state.save()
 
     actions = area.get("suggested_actions") if isinstance(area.get("suggested_actions"), list) else []
@@ -653,6 +690,58 @@ def _world_area_payload(payload: Dict) -> Dict:
         "entry_direction": direction,
         "narration": str(area.get("arrival_text") or f"You enter {area.get('name', 'a new area')}."),
         "suggested_actions": suggested,
+        "state": GAME_MASTER.state.snapshot(),
+        "new_maps": [deepcopy(discovered)],
+    }
+
+
+def _known_map_ids() -> set[str]:
+    return {str(item.get("id") or "") for item in list_maps(GAME_MASTER.state.data) if isinstance(item, dict)}
+
+
+def _generate_newly_discovered_maps(before_ids: set[str]) -> List[Dict]:
+    after = list_maps(GAME_MASTER.state.data)
+    new_ids = [str(item.get("id") or "") for item in after if str(item.get("id") or "") not in before_ids]
+    if not new_ids:
+        return []
+    return generate_pending_maps(GAME_MASTER, MAPS_DIR, limit=len(new_ids), only_ids=new_ids)
+
+
+def _maps_list_payload() -> Dict:
+    world = GAME_MASTER.state.data.get("world_profile")
+    if not list_maps(GAME_MASTER.state.data) and isinstance(world, dict) and world:
+        install_initial_maps(GAME_MASTER.state.data, initial_map_records(world))
+        GAME_MASTER.state.save()
+    gallery = GAME_MASTER.state.data.get("map_gallery")
+    if not isinstance(gallery, dict):
+        gallery = {"maps": [], "selected_map_id": None}
+    player = GAME_MASTER.state.data.get("player")
+    location = str(player.get("location") or "Unknown") if isinstance(player, dict) else "Unknown"
+    return {
+        "ok": True,
+        "maps": list_maps(GAME_MASTER.state.data),
+        "selected_map_id": gallery.get("selected_map_id"),
+        "current_location": location,
+        "state": GAME_MASTER.state.snapshot(),
+    }
+
+
+def _map_load_payload(payload: Dict) -> Dict:
+    map_id = str(payload.get("map_id") or "").strip()
+    record = find_map(GAME_MASTER.state.data, map_id)
+    if not isinstance(record, dict):
+        return {"ok": False, "error": "That map is not in your gallery."}
+    if str(record.get("image_status")) != "ready" or not load_map_base64(record, MAPS_DIR):
+        world = GAME_MASTER.state.data.get("world_profile")
+        generate_map_image(GAME_MASTER.provider, world if isinstance(world, dict) else {}, record, MAPS_DIR)
+        GAME_MASTER.state.save()
+    gallery = GAME_MASTER.state.data.setdefault("map_gallery", {})
+    gallery["selected_map_id"] = map_id
+    GAME_MASTER.state.save()
+    return {
+        "ok": True,
+        "map": deepcopy(record),
+        "map_base64": load_map_base64(record, MAPS_DIR),
         "state": GAME_MASTER.state.snapshot(),
     }
 
@@ -677,14 +766,24 @@ def _handle_action(action: str) -> Dict:
         if direct is not None:
             direct["ok"] = True
             return direct
+    before_maps = _known_map_ids()
     result = GAME_MASTER.handle_action(clean)
+    new_maps = _generate_newly_discovered_maps(before_maps)
+    if new_maps:
+        result["new_maps"] = new_maps
+        result["state"] = GAME_MASTER.state.snapshot()
     result["ok"] = True
     return _json_safe(result)
 
 
 def _handle_roll() -> Dict:
     try:
+        before_maps = _known_map_ids()
         result = GAME_MASTER.resolve_pending_roll()
+        new_maps = _generate_newly_discovered_maps(before_maps)
+        if new_maps:
+            result["new_maps"] = new_maps
+            result["state"] = GAME_MASTER.state.snapshot()
         result["ok"] = True
         return _json_safe(result)
     except (TypeError, ValueError) as exc:
@@ -825,6 +924,9 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/character/hub":
                     self._send(200, _character_hub_response())
                     return
+                if self.path == "/maps":
+                    self._send(200, _maps_list_payload())
+                    return
                 if self.path in {"/", "/session", "/state"}:
                     self._send(200, _session_payload())
                     return
@@ -854,6 +956,10 @@ class Handler(BaseHTTPRequestHandler):
                     result = _character_hub_action(payload, "load_portrait")
                 elif self.path == "/character/portrait/generate":
                     result = _character_hub_action(payload, "generate_portrait")
+                elif self.path == "/maps/list":
+                    result = _maps_list_payload()
+                elif self.path == "/maps/load":
+                    result = _map_load_payload(payload)
                 elif self.path == "/world/area/generate":
                     result = _world_area_payload(payload)
                 elif self.path == "/prototype/battle/start":
