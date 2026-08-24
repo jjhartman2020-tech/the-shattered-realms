@@ -90,6 +90,8 @@ func apply_payload(payload: Dictionary, mode: String) -> void:
 		if load_error != OK:
 			load_error = image.load_jpg_from_buffer(raw)
 		if load_error != OK:
+			load_error = image.load_webp_from_buffer(raw)
+		if load_error != OK:
 			map_image.texture = null
 			_set_status("This map image could not be read.", true)
 			return
@@ -134,6 +136,8 @@ func _build_ui() -> void:
 	header.add_child(heading)
 	count_label = _muted("0 MAPS")
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	count_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	count_label.custom_minimum_size.x = 92
 	header.add_child(count_label)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
