@@ -134,7 +134,7 @@ func _build() -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 8)
 	root.add_child(tabs)
-	for entry in [["ABILITIES", "abilities"], ["STATS & SKILLS", "stats"], ["ARMOR", "armor"]]:
+	for entry in [["ABILITIES", "abilities"], ["STATS", "stats"], ["ARMOR", "armor"]]:
 		var tab := _button(str(entry[0]), false)
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tab.custom_minimum_size.y = 42
@@ -288,11 +288,12 @@ func _learn_choice(choice_index: int, replacement: OptionButton) -> void:
 
 func _render_stats(player: Dictionary) -> void:
 	var sp := int(player.get("skill_points_unspent", 0))
-	_add_section_heading("CORE STATS  •  %d SP AVAILABLE" % sp, "Spend one SP at a time. Every 3 points normally adds +1 to checks; some stats also improve HP, movement, initiative, resources, or combat rules.")
+	_add_section_heading("13 CORE STATS  •  %d SP AVAILABLE" % sp, "Spend SP directly on these stats. Every 3 points normally adds +1 to that stat's checks; each row explains its other effects.")
 	var stats: Dictionary = player.get("stats", {}) if player.get("stats", {}) is Dictionary else {}
 	var armor_bonuses: Dictionary = player.get("armor_stat_bonuses", {}) if player.get("armor_stat_bonuses", {}) is Dictionary else {}
 	for stat in CORE_STATS:
 		var row := _panel(PANEL)
+		content_box.add_child(row)
 		var margin := _card_margin()
 		row.add_child(margin)
 		var horizontal := HBoxContainer.new()
@@ -314,27 +315,6 @@ func _render_stats(player: Dictionary) -> void:
 		add_button.disabled = sp <= 0 or value >= 100 or _combat_active()
 		add_button.pressed.connect(_request.bind("/character/stats/spend", {"stat": stat, "amount": 1}, "character_stats"))
 		horizontal.add_child(add_button)
-
-	var divider := HSeparator.new()
-	content_box.add_child(divider)
-	_add_section_heading("TRAINED SKILLS", "These bonuses are added on top of the governing core-stat bonus whenever that skill is used.")
-	var skills: Dictionary = player.get("skills", {}) if player.get("skills", {}) is Dictionary else {}
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	content_box.add_child(grid)
-	var skill_names: Array = skills.keys()
-	skill_names.sort()
-	for skill_name in skill_names:
-		var skill_card := _panel(PANEL)
-		skill_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var skill_margin := MarginContainer.new()
-		for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-			skill_margin.add_theme_constant_override(side, 10)
-		skill_card.add_child(skill_margin)
-		skill_margin.add_child(_label("%s   %s" % [str(skill_name).replace("_", " ").capitalize(), _signed(int(skills.get(skill_name, 0)))], 13, TEXT))
-		grid.add_child(skill_card)
 
 
 func _render_armor(player: Dictionary) -> void:
