@@ -729,7 +729,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		"world_generate":
 			draft_world = payload.get("world", {}) if payload.get("world", {}) is Dictionary else {}
 			draft_maps = payload.get("maps", []) if payload.get("maps", []) is Array else []
-			draft_world_map_base64 = str(payload.get("world_map_base64") or "")
+			var map_value = payload.get("world_map_base64")
+			draft_world_map_base64 = "" if map_value == null else str(map_value)
 			_show_world_review()
 		"world_confirm":
 			_show_identity()
@@ -808,15 +809,19 @@ func _world_text(world: Dictionary) -> String:
 	return "\n".join(lines)
 
 
-func _texture_from_base64(encoded: String):
+func _texture_from_base64(encoded: String) -> ImageTexture:
 	if encoded.is_empty():
 		return null
-	var image := Image.new()
 	var raw := Marshalls.base64_to_raw(encoded)
-	var error := image.load_png_from_buffer(raw)
-	if error != OK:
+	if raw.size() < 4:
+		return null
+	var image := Image.new()
+	var error := ERR_FILE_UNRECOGNIZED
+	if raw.size() >= 8 and raw[0] == 0x89 and raw[1] == 0x50 and raw[2] == 0x4e and raw[3] == 0x47:
+		error = image.load_png_from_buffer(raw)
+	elif raw[0] == 0xff and raw[1] == 0xd8 and raw[2] == 0xff:
 		error = image.load_jpg_from_buffer(raw)
-	if error != OK:
+	elif raw.size() >= 12 and raw[0] == 0x52 and raw[1] == 0x49 and raw[2] == 0x46 and raw[3] == 0x46 and raw[8] == 0x57 and raw[9] == 0x45 and raw[10] == 0x42 and raw[11] == 0x50:
 		error = image.load_webp_from_buffer(raw)
 	if error != OK:
 		return null
