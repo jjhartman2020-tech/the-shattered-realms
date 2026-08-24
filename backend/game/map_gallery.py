@@ -15,6 +15,7 @@ import zlib
 
 
 MAP_TYPES = {"universe", "world", "town"}
+MAP_RENDER_VERSION = 2
 
 
 def _slug(value: str) -> str:
@@ -69,6 +70,7 @@ def normalize_map_record(raw: Dict, *, discovered_turn: int = 0) -> Dict:
         "image_source": str(raw.get("image_source") or ""),
         "image_model": str(raw.get("image_model") or ""),
         "image_error": str(raw.get("image_error") or ""),
+        "image_render_version": max(0, int(raw.get("image_render_version", 0) or 0)),
         "source": str(raw.get("source") or "story"),
     }
 
@@ -117,13 +119,30 @@ def initial_map_records(world: Dict) -> List[Dict]:
 def _map_prompt(world: Dict, record: Dict) -> str:
     map_type = str(record.get("map_type") or "town")
     type_direction = {
-        "universe": "a wide star-chart showing the known planets, moons, and safe travel routes",
-        "world": "a full world or regional atlas showing broad geography and known public places",
-        "town": "a useful overhead town map with streets, districts, paths, and known public landmarks",
+        "universe": "an orthographic star-chart with distinct planets, moons, sectors, and clearly traced public travel routes",
+        "world": "a true overhead atlas with coastlines, borders, terrain regions, roads, rivers, and known settlements",
+        "town": "a true overhead street plan with blocks, roads, districts, gates, paths, and known public landmarks",
     }[map_type]
-    return f"""Create an original illustrated map for a teen-rated AI text RPG.
-Map title shown by the game UI: {record.get('title', 'Campaign Map')}
-Map purpose: {type_direction}.
+    label_candidates: List[str] = []
+    raw_candidates: List[Any] = [record.get("location")]
+    important_locations = world.get("important_locations")
+    if isinstance(important_locations, list):
+        raw_candidates.extend(important_locations)
+    for raw in raw_candidates:
+        label = str(raw or "").strip()
+        for separator in (" — ", " - ", ":", "("):
+            label = label.split(separator, 1)[0].strip()
+        if not label or len(label) > 28 or label.lower() in {item.lower() for item in label_candidates}:
+            continue
+        label_candidates.append(label)
+        if len(label_candidates) >= 7:
+            break
+    exact_labels = ", ".join(f'"{label.upper()}"' for label in label_candidates) or '"KNOWN REGION"'
+    return f"""GOAL
+Create a functional, readable cartographic map for a teen-rated AI text RPG. This must look like an actual map used for navigation—not a landscape painting, cinematic scene, concept-art picture, poster, or angled view.
+
+MAP CONTENT
+Map type and purpose: {type_direction}.
 World name: {world.get('name', 'Untitled World')}
 Player's world request: {world.get('player_request', '')}
 World premise: {world.get('premise', '')}
@@ -131,7 +150,21 @@ Genre / era / technology: {world.get('genre', '')} / {world.get('era', '')} / {w
 Map location: {record.get('location', '')}
 Location description: {record.get('description', '')}
 
-Match the established world's visual identity exactly. Use polished colorful game-cartography, a strong readable silhouette, clear routes and regions, and a decorative border appropriate to the setting. Show only information a traveler could reasonably know. Do not reveal secret locations, hidden enemies, future events, puzzle answers, undiscovered treasure, or private Game Master information. Use sparse short labels because the game UI displays the exact title separately. No UI controls, logos, copyrighted characters, gore, or sexual content. Landscape composition."""
+VISUAL RULES
+- Strict 90-degree top-down / orthographic cartography with flat, clean map symbols.
+- Clear geographic shapes and navigation routes are more important than decorative artwork.
+- Use a restrained setting-appropriate color palette, a subtle paper or tactical-display texture, a small compass rose, and a simple border.
+- No people, dramatic foreground objects, horizon, sky, camera perspective, scenery, fake game UI, logos, watermark, copyrighted characters, gore, or sexual content.
+
+LABEL RULES
+- Use no more than 7 labels total. Only use these exact public names where geographically relevant: {exact_labels}.
+- Render every label once, verbatim, in LARGE BOLD UPPERCASE block lettering.
+- Use a clean sans-serif or highly readable atlas typeface, generous spacing, and strong contrast.
+- Put each name on a pale solid label plate with dark lettering, never directly over busy terrain.
+- No cursive, runes, decorative lettering, tiny writing, warped words, invented extra names, legends full of text, or map title inside the image. The game UI displays the title separately.
+
+KNOWLEDGE LIMITS
+Show only geography and public places the player could reasonably know. Do not reveal secret locations, hidden enemies, future events, puzzle answers, undiscovered treasure, or private Game Master information. Use a landscape aspect ratio."""
 
 
 def _fallback_png(record: Dict, world: Dict, width: int = 960, height: int = 640) -> bytes:
@@ -235,7 +268,8 @@ def generate_map_image(provider, world: Dict, record: Dict, output_dir: Path) ->
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / Path(str(record.get("image_file") or "map.png")).name
     cached_bytes = _read_valid_png(image_path)
-    if cached_bytes:
+    render_is_current = int(record.get("image_render_version", 0) or 0) == MAP_RENDER_VERSION
+    if cached_bytes and render_is_current:
         record["image_status"] = "ready"
         return record
     if image_path.is_file():
@@ -250,9 +284,9 @@ def generate_map_image(provider, world: Dict, record: Dict, output_dir: Path) ->
     try:
         if client is not None and hasattr(client, "images"):
             model = os.getenv("OPENAI_MAP_IMAGE_MODEL", os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1.5")).strip() or "gpt-image-1.5"
-            quality = os.getenv("OPENAI_MAP_IMAGE_QUALITY", "low").strip().lower()
+            quality = os.getenv("OPENAI_MAP_IMAGE_QUALITY", "medium").strip().lower()
             if quality not in {"low", "medium", "high", "auto"}:
-                quality = "low"
+                quality = "medium"
             result = client.images.generate(
                 model=model,
                 prompt=_map_prompt(world, record),
@@ -285,6 +319,7 @@ def generate_map_image(provider, world: Dict, record: Dict, output_dir: Path) ->
     temporary.replace(image_path)
     record["image_file"] = image_path.name
     record["image_status"] = "ready"
+    record["image_render_version"] = MAP_RENDER_VERSION
     record["image_error"] = generation_error[:320]
     return record
 
@@ -357,6 +392,9 @@ def find_map(state: Dict, map_id: str) -> Dict | None:
 
 
 def load_map_base64(record: Dict, output_dir: Path) -> str:
+    if int(record.get("image_render_version", 0) or 0) != MAP_RENDER_VERSION:
+        record["image_status"] = "pending"
+        return ""
     image_path = output_dir / Path(str(record.get("image_file") or "")).name
     image_bytes = _read_valid_png(image_path)
     if not image_bytes:
