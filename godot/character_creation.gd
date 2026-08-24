@@ -59,6 +59,8 @@ var finish_button: Button
 var updating_stat_controls := false
 
 var draft_world: Dictionary = {}
+var draft_maps: Array = []
+var draft_world_map_base64 := ""
 var package: Dictionary = {}
 var derived: Dictionary = {}
 var draft_name := ""
@@ -85,6 +87,8 @@ func _ready() -> void:
 
 func begin_new_game(_state: Dictionary = {}) -> void:
 	draft_world = {}
+	draft_maps = []
+	draft_world_map_base64 = ""
 	package = {}
 	derived = {}
 	draft_name = ""
@@ -209,7 +213,7 @@ func _generate_world() -> void:
 	if prompt.is_empty():
 		_set_error("Describe the world you want first.")
 		return
-	_set_status("Generating your world with the AI World Architect...")
+	_set_status("Generating your world and its first world map...")
 	_post("/creation/world/generate", {"prompt": prompt}, "world_generate")
 
 
@@ -225,6 +229,21 @@ func _show_world_review() -> void:
 	summary.add_theme_color_override("default_color", TEXT)
 	summary.text = _world_text(draft_world)
 	content.add_child(summary)
+
+	content.add_child(HSeparator.new())
+	content.add_child(_heading("YOUR FIRST WORLD MAP"))
+	content.add_child(_muted("This shows known geography only. Hidden places and future discoveries stay secret."))
+	if not draft_world_map_base64.is_empty():
+		var map_preview := TextureRect.new()
+		map_preview.custom_minimum_size = Vector2(0, 420)
+		map_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		map_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		map_preview.texture = _texture_from_base64(draft_world_map_base64)
+		content.add_child(map_preview)
+	else:
+		content.add_child(_muted("The map preview is not available, but the map will still be saved in your Map Gallery."))
+	if draft_maps.size() > 1:
+		content.add_child(_muted("This spacefaring world also includes a Universe Map in your Map Gallery."))
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
@@ -709,6 +728,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	match request_mode:
 		"world_generate":
 			draft_world = payload.get("world", {}) if payload.get("world", {}) is Dictionary else {}
+			draft_maps = payload.get("maps", []) if payload.get("maps", []) is Array else []
+			draft_world_map_base64 = str(payload.get("world_map_base64") or "")
 			_show_world_review()
 		"world_confirm":
 			_show_identity()
@@ -785,6 +806,19 @@ func _world_text(world: Dictionary) -> String:
 		lines.append("\n" + "  •  ".join(details))
 	lines.append("\nLocations, factions, conflicts, and secrets will be discovered during the adventure.")
 	return "\n".join(lines)
+
+
+func _texture_from_base64(encoded: String):
+	if encoded.is_empty():
+		return null
+	var image := Image.new()
+	var raw := Marshalls.base64_to_raw(encoded)
+	var error := image.load_png_from_buffer(raw)
+	if error != OK:
+		error = image.load_jpg_from_buffer(raw)
+	if error != OK:
+		return null
+	return ImageTexture.create_from_image(image)
 
 
 func _ability_text(ability) -> String:
