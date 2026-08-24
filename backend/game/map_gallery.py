@@ -66,6 +66,9 @@ def normalize_map_record(raw: Dict, *, discovered_turn: int = 0) -> Dict:
         "discovered_turn": max(0, int(raw.get("discovered_turn", discovered_turn) or 0)),
         "image_file": str(raw.get("image_file") or f"{_slug(map_id)}.png"),
         "image_status": str(raw.get("image_status") or "pending"),
+        "image_source": str(raw.get("image_source") or ""),
+        "image_model": str(raw.get("image_model") or ""),
+        "image_error": str(raw.get("image_error") or ""),
         "source": str(raw.get("source") or "story"),
     }
 
@@ -177,15 +180,72 @@ def _fallback_png(record: Dict, world: Dict, width: int = 960, height: int = 640
     )
 
 
+def _is_valid_png(image_bytes: bytes) -> bool:
+    """Validate the whole PNG container so corrupt cached files are never reused."""
+    if not isinstance(image_bytes, bytes) or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return False
+    position = 8
+    saw_header = False
+    saw_image_data = False
+    saw_end = False
+    try:
+        while position + 12 <= len(image_bytes):
+            length = struct.unpack(">I", image_bytes[position:position + 4])[0]
+            kind = image_bytes[position + 4:position + 8]
+            data_start = position + 8
+            data_end = data_start + length
+            crc_end = data_end + 4
+            if crc_end > len(image_bytes):
+                return False
+            payload = image_bytes[data_start:data_end]
+            expected_crc = struct.unpack(">I", image_bytes[data_end:crc_end])[0]
+            if (zlib.crc32(kind + payload) & 0xFFFFFFFF) != expected_crc:
+                return False
+            if kind == b"IHDR":
+                if saw_header or length != 13:
+                    return False
+                width, height = struct.unpack(">II", payload[:8])
+                if width < 1 or height < 1:
+                    return False
+                saw_header = True
+            elif kind == b"IDAT":
+                saw_image_data = saw_image_data or length > 0
+            elif kind == b"IEND":
+                if length != 0:
+                    return False
+                saw_end = True
+                position = crc_end
+                break
+            position = crc_end
+    except (struct.error, TypeError, ValueError):
+        return False
+    return saw_header and saw_image_data and saw_end and position == len(image_bytes)
+
+
+def _read_valid_png(image_path: Path) -> bytes:
+    try:
+        image_bytes = image_path.read_bytes() if image_path.is_file() else b""
+    except OSError:
+        return b""
+    return image_bytes if _is_valid_png(image_bytes) else b""
+
+
 def generate_map_image(provider, world: Dict, record: Dict, output_dir: Path) -> Dict:
     """Generate and cache exactly one map image, falling back without breaking play."""
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / Path(str(record.get("image_file") or "map.png")).name
-    if image_path.is_file():
+    cached_bytes = _read_valid_png(image_path)
+    if cached_bytes:
         record["image_status"] = "ready"
         return record
+    if image_path.is_file():
+        try:
+            image_path.unlink()
+        except OSError:
+            pass
 
     image_bytes = b""
+    generation_error = ""
     client = getattr(provider, "client", None)
     try:
         if client is not None and hasattr(client, "images"):
@@ -198,21 +258,34 @@ def generate_map_image(provider, world: Dict, record: Dict, output_dir: Path) ->
                 prompt=_map_prompt(world, record),
                 size="1536x1024",
                 quality=quality,
+                output_format="png",
             )
             encoded = getattr(result.data[0], "b64_json", "") if getattr(result, "data", None) else ""
-            if encoded:
-                image_bytes = base64.b64decode(encoded)
-    except Exception:
+            if not encoded:
+                raise ValueError("The image service returned no map image.")
+            image_bytes = base64.b64decode(encoded, validate=True)
+            if not _is_valid_png(image_bytes):
+                raise ValueError("The image service returned a corrupt or unsupported map image.")
+            record["image_source"] = "ai"
+            record["image_model"] = model
+    except Exception as exc:
+        generation_error = str(exc).strip() or exc.__class__.__name__
+        print(f"[Map Gallery] AI map generation failed; using a backup map: {generation_error}")
         image_bytes = b""
 
     if not image_bytes:
         image_bytes = _fallback_png(record, world)
-        record["source"] = f"{record.get('source', 'story')}_fallback"
+        record["image_source"] = "fallback"
+    if not _is_valid_png(image_bytes):
+        record["image_status"] = "error"
+        record["image_error"] = generation_error or "Map image validation failed."
+        return record
     temporary = image_path.with_suffix(image_path.suffix + ".tmp")
     temporary.write_bytes(image_bytes)
     temporary.replace(image_path)
     record["image_file"] = image_path.name
     record["image_status"] = "ready"
+    record["image_error"] = generation_error[:320]
     return record
 
 
@@ -285,10 +358,12 @@ def find_map(state: Dict, map_id: str) -> Dict | None:
 
 def load_map_base64(record: Dict, output_dir: Path) -> str:
     image_path = output_dir / Path(str(record.get("image_file") or "")).name
-    try:
-        return base64.b64encode(image_path.read_bytes()).decode("ascii") if image_path.is_file() else ""
-    except OSError:
+    image_bytes = _read_valid_png(image_path)
+    if not image_bytes:
+        if image_path.is_file():
+            record["image_status"] = "pending"
         return ""
+    return base64.b64encode(image_bytes).decode("ascii")
 
 
 def clear_map_cache(output_dir: Path) -> None:
